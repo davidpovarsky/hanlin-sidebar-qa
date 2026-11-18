@@ -1,0 +1,27 @@
+﻿name: HanlinSidebarQA
+options:
+  bundleIdPrefix: com.goldypov
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    SWIFT_VERSION: "5.9"
+targets:
+  HanlinSidebarQA:
+    type: application
+    platform: iOS
+    sources: [App]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.goldypov.hanlinsidebarqa
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGNING_ALLOWED: NO
+  HanlinSidebarQATests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    dependencies: [HanlinSidebarQA]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGNING_ALLOWED: NO
