@@ -20,8 +20,10 @@ targets:
     type: bundle.ui-testing
     platform: iOS
     sources: [Tests]
-    dependencies: [HanlinSidebarQA]
+    dependencies: 
+      - target: HanlinSidebarQA
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGNING_ALLOWED: NO
+
