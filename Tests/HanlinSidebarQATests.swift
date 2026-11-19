@@ -3,9 +3,11 @@ import XCTest
 final class HanlinSidebarQATests: XCTestCase {
     private func openSidebar(_ app: XCUIApplication) {
         let toggle = app.buttons["sidebar-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 12), "Sidebar toggle missing")
-        toggle.tap()
         let settings = app.buttons["sidebar-settings"]
+        if !settings.isHittable {
+            XCTAssertTrue(toggle.waitForExistence(timeout: 12), "Sidebar toggle missing")
+            toggle.tap()
+        }
         XCTAssertTrue(settings.waitForExistence(timeout: 8), "Sidebar settings missing after toggle")
         XCTAssertTrue(settings.isHittable, "Sidebar settings not hittable")
     }
