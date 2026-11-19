@@ -396,6 +396,7 @@ private struct HistorySidebar: View {
                     .padding(17)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("sidebar-settings")
         }
         .background(Theme.sidebar)
     }
@@ -736,6 +737,7 @@ private struct ChatScreen: View {
                 Image(systemName: "sidebar.left")
             }
             .accessibilityLabel("הצג סרגל שיחות")
+            .accessibilityIdentifier("sidebar-toggle")
             
             Text(title)
                 .font(.headline)
@@ -1259,6 +1261,7 @@ private struct SettingsHomeView: View {
     var body: some View {
         NavigationStack {
             List {
+                Text("Settings").accessibilityIdentifier("settings-screen-marker")
                 Section("Customize Hanlin") {
                     categoryLink(SettingsData.personalization)
                     categoryLink(SettingsData.memory)

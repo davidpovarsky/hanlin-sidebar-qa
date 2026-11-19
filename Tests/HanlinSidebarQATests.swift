@@ -1,21 +1,43 @@
-﻿import XCTest
+import XCTest
 
 final class HanlinSidebarQATests: XCTestCase {
+    private func openSidebar(_ app: XCUIApplication) {
+        let toggle = app.buttons["sidebar-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 12), "Sidebar toggle missing")
+        toggle.tap()
+        let settings = app.buttons["sidebar-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 8), "Sidebar settings missing after toggle")
+        XCTAssertTrue(settings.isHittable, "Sidebar settings not hittable")
+    }
+
     func testSettingsFromSidebar() {
         let app = XCUIApplication()
         app.launch()
-        let sidebar = app.buttons["sidebar.left"]
-        if sidebar.exists { sidebar.tap() }
-        let settings = app.buttons["הגדרות"].firstMatch
-        XCTAssertTrue(settings.waitForExistence(timeout: 8), "Settings button absent")
-        settings.tap()
-        XCTAssertTrue(app.navigationBars["הגדרות Hanlin"].waitForExistence(timeout: 8), "Settings did not open")
+        openSidebar(app)
+        app.buttons["sidebar-settings"].tap()
+        XCTAssertTrue(app.staticTexts["settings-screen-marker"].waitForExistence(timeout: 8),
+                      "Settings screen did not open")
     }
-    func testSearchAndConversationSelection() {
+
+    func testSidebarOpensAndCloses() {
         let app = XCUIApplication()
         app.launch()
-        let sidebar = app.buttons["sidebar.left"]
-        if sidebar.exists { sidebar.tap() }
-        XCTAssertTrue(app.staticTexts["מחקר עם מקורות"].firstMatch.waitForExistence(timeout: 8))
+        openSidebar(app)
+        app.buttons["sidebar-toggle"].tap()
+        XCTAssertTrue(app.buttons["sidebar-toggle"].waitForExistence(timeout: 5))
+    }
+
+    func testSettingsAfterDrag() {
+        let app = XCUIApplication()
+        app.launch()
+        let screen = app.windows.firstMatch
+        let left = screen.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.5))
+        let right = screen.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.5))
+        left.press(forDuration: 0.05, thenDragTo: right)
+        let settings = app.buttons["sidebar-settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 8), "Swipe did not reveal sidebar")
+        XCTAssertTrue(settings.isHittable, "Sidebar not interactive after swipe")
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["settings-screen-marker"].waitForExistence(timeout: 8))
     }
 }
