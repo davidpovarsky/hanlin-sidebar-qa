@@ -69,16 +69,59 @@ final class HanlinSidebarQATests: XCTestCase {
         wait(NSPredicate(format: "exists == false"), on: element, file: file, line: line)
     }
 
+    private func dismissObservedKeyboardOnboardingIfPresent(
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        // This is the exact iOS 26.2 first-use keyboard overlay observed in CI.
+        // Do not tap generic Continue buttons or dismiss an ordinary keyboard.
+        let introduction = app.otherElements["UIContinuousPathIntroductionView"]
+        guard introduction.waitForExistence(timeout: 2) else { return }
+        let message = introduction.staticTexts[
+            "Speed up your typing by sliding your finger across the letters to compose a word."
+        ]
+        guard message.exists else { return }
+        let continueButton = introduction.buttons["Continue"]
+        XCTAssertTrue(continueButton.waitForExistence(timeout: 5),
+                      "The observed keyboard introduction has no Continue action", file: file, line: line)
+        tapCenter(continueButton, evidenceName: "keyboard-first-use-introduction", file: file, line: line)
+        waitGone(introduction, file: file, line: line)
+    }
+
     private func tapCenter(_ element: XCUIElement,
+                           evidenceName: String? = nil,
                            file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: 10), "Control missing", file: file, line: line)
         wait(NSPredicate { _, _ in element.isHittable }, on: element, file: file, line: line)
         let frame = element.frame
+        let windowFrame = window.frame
         XCTAssertGreaterThan(frame.width, 0, file: file, line: line)
         XCTAssertGreaterThan(frame.height, 0, file: file, line: line)
-        XCTAssertTrue(window.frame.contains(CGPoint(x: frame.midX, y: frame.midY)),
+        XCTAssertTrue(windowFrame.contains(CGPoint(x: frame.midX, y: frame.midY)),
                       "Control center is outside the application window: \(frame)", file: file, line: line)
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let coordinate = element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let identifier = element.identifier
+        let targetDetails = """
+            Physical tap: identifier=\(identifier), accessibility frame=\(frame), center=\(CGPoint(x: frame.midX, y: frame.midY)), app window=\(windowFrame)
+            """
+        print(targetDetails)
+        if let evidenceName {
+            let resolvedTarget = "\nResolved XCUICoordinate.screenPoint=\(coordinate.screenPoint)"
+            let tree = XCTAttachment(string: targetDetails + resolvedTarget + "\n\n" + app.debugDescription)
+            tree.name = evidenceName + " — immediately before physical tap"
+            tree.lifetime = .keepAlways
+            add(tree)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = evidenceName + " — screen before physical tap"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        }
+        if identifier == "sidebar-new-chat" || identifier == "sidebar-toggle" {
+            XCTAssertLessThanOrEqual(frame.width, 64,
+                                     "Icon button exported an oversized accessibility target", file: file, line: line)
+            XCTAssertLessThanOrEqual(frame.height, 64,
+                                     "Icon button exported an oversized accessibility target", file: file, line: line)
+        }
+        coordinate.tap()
     }
 
     private func requireSidebar(_ open: Bool,
@@ -98,8 +141,17 @@ final class HanlinSidebarQATests: XCTestCase {
         } else {
             // A covered control must be removed from the accessibility tree as well.
             waitGone(settings, file: file, line: line)
-            XCTAssertLessThan(toggle.frame.midX, window.frame.minX + 100,
-                              "Workspace did not return to the leading edge", file: file, line: line)
+            wait(NSPredicate { _, _ in self.toggle.isHittable }, on: toggle, file: file, line: line)
+            let content = app.scrollViews["chat-history"].frame
+            let viewport = window.frame
+            // iPad window controls can legitimately inset the custom toolbar.
+            // Measure the actual content, whose closed position is unchanged.
+            XCTAssertEqual(content.minX, viewport.minX, accuracy: 2,
+                           "Workspace did not return to the leading edge", file: file, line: line)
+            XCTAssertEqual(content.width, viewport.width, accuracy: 2,
+                           "Closed workspace must fill the actual window", file: file, line: line)
+            XCTAssertTrue(viewport.contains(CGPoint(x: toggle.frame.midX, y: toggle.frame.midY)),
+                          "Closed toolbar toggle is outside the window", file: file, line: line)
         }
     }
 
@@ -162,17 +214,20 @@ final class HanlinSidebarQATests: XCTestCase {
         tapCenter(search)
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5),
                       "Search did not bring up the software keyboard")
+        dismissObservedKeyboardOnboardingIfPresent()
         search.typeText("SwiftUI")
         waitForValue("SwiftUI", on: search)
         XCTAssertTrue(app.buttons["sidebar-chat-3"].waitForExistence(timeout: 10))
         waitGone(app.buttons["sidebar-chat-1"])
         waitGone(app.buttons["sidebar-chat-2"])
         tapCenter(app.buttons["sidebar-chat-3"])
+        dismissObservedKeyboardOnboardingIfPresent()
         waitGone(app.keyboards.firstMatch)
         waitForLabel("תכנון אפליקציית SwiftUI", on: app.staticTexts["chat-title"])
         if !isWide { requireSidebar(false) }
         setSidebar(true)
         tapCenter(search)
+        dismissObservedKeyboardOnboardingIfPresent()
         search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 7))
         XCTAssertTrue(app.buttons["sidebar-chat-1"].waitForExistence(timeout: 10))
         tapCenter(app.buttons["sidebar-chat-2"])
@@ -182,11 +237,12 @@ final class HanlinSidebarQATests: XCTestCase {
 
     func testNewChatAndSend() {
         setSidebar(true)
-        tapCenter(app.buttons["sidebar-new-chat"])
+        tapCenter(app.buttons["sidebar-new-chat"], evidenceName: "new-chat")
         XCTAssertTrue(app.staticTexts["chat-empty"].waitForExistence(timeout: 10))
         waitForLabel("שיחה חדשה", on: app.staticTexts["chat-title"])
         let composer = input("chat-input")
         tapCenter(composer)
+        dismissObservedKeyboardOnboardingIfPresent()
         let text = "Sidebar QA message."
         composer.typeText(text)
         tapCenter(app.buttons["chat-send"])
@@ -203,6 +259,7 @@ final class HanlinSidebarQATests: XCTestCase {
                 tapCenter(app.buttons["sidebar-action-" + action])
                 let actionInput = input("quick-action-input")
                 tapCenter(actionInput)
+                dismissObservedKeyboardOnboardingIfPresent()
                 actionInput.typeText("Test text")
                 tapCenter(app.buttons["quick-action-run"])
                 XCTAssertTrue(app.staticTexts["quick-action-result"].waitForExistence(timeout: 10))
@@ -255,6 +312,39 @@ final class HanlinSidebarQATests: XCTestCase {
             .press(forDuration: 0.05,
                    thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)))
         requireSidebar(true)
+
+        // Exercise real toolbar and composer controls, beyond the approximate
+        // content heights above. Focus the composer through an ordinary tap so
+        // its drag runs with the real keyboard and actual adjusted geometry.
+        for controlID in ["sidebar-toggle", "chat-input"] {
+            XCTContext.runActivity(named: "Drag from measured \(controlID) row") { _ in
+                setSidebar(false)
+                let control = controlID == "sidebar-toggle" ? toggle : input("chat-input")
+                XCTAssertTrue(control.waitForExistence(timeout: 10))
+                if controlID == "chat-input" {
+                    tapCenter(control)
+                    XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
+                                  "The composer tap did not show the software keyboard")
+                    dismissObservedKeyboardOnboardingIfPresent()
+                }
+                let openY = (control.frame.midY - window.frame.minY) / window.frame.height
+                let openStart = control.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                let openEnd = window.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: openY))
+                openStart.press(forDuration: 0.05, thenDragTo: openEnd)
+                requireSidebar(true)
+
+                // The translated input center may be offscreen. Start the close
+                // in the visible content strip at the control's current midY,
+                // remeasuring in case the keyboard geometry changed.
+                XCTAssertTrue(control.waitForExistence(timeout: 10))
+                let closeY = (control.frame.midY - window.frame.minY) / window.frame.height
+                let closeStart = window.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: closeY))
+                let closeEnd = window.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: closeY))
+                closeStart.press(forDuration: 0.05, thenDragTo: closeEnd)
+                requireSidebar(false)
+            }
+        }
+        setSidebar(true)
         tapCenter(settings)
         XCTAssertTrue(app.buttons["settings-category-personal"].waitForExistence(timeout: 10))
     }

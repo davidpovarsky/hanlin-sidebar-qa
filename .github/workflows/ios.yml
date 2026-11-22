@@ -42,6 +42,16 @@ jobs:
           xcodegen generate
           xcodebuild -version
           xcodebuild -project HanlinSidebarQA.xcodeproj -list
+      - name: Build application and UI tests
+        run: |
+          set -o pipefail
+          xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath "$RUNNER_TEMP/derived" CODE_SIGNING_ALLOWED=NO build-for-testing \
+            | tee "$RUNNER_TEMP/build.log" | python3 -u ci/annotate_tests.py
+      - name: Verify built universal and resizable application
+        run: |
+          python3 ci/verify_app.py "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/HanlinSidebarQA.app" iPhoneSimulator > "$RUNNER_TEMP/bundle-verification.json"
       - name: Boot simulator with software keyboard
         run: |
           defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
@@ -59,11 +69,8 @@ jobs:
           xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA \
             -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
             -derivedDataPath "$RUNNER_TEMP/derived" -resultBundlePath "$RUNNER_TEMP/qa.xcresult" \
-            -parallel-testing-enabled NO "-only-testing:$SELECTOR" CODE_SIGNING_ALLOWED=NO test \
-            | tee "$RUNNER_TEMP/xcodebuild.log"
-      - name: Verify built universal and resizable application
-        run: |
-          python3 ci/verify_app.py "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/HanlinSidebarQA.app" iPhoneSimulator > "$RUNNER_TEMP/bundle-verification.json"
+            -parallel-testing-enabled NO "-only-testing:$SELECTOR" CODE_SIGNING_ALLOWED=NO test-without-building \
+            | tee "$RUNNER_TEMP/xcodebuild.log" | python3 -u ci/annotate_tests.py
       - name: Export screenshots and structured test results
         if: always()
         run: |
@@ -73,6 +80,18 @@ jobs:
             xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/qa.xcresult" > "$RUNNER_TEMP/evidence/tests.json"
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/qa.xcresult" --output-path "$RUNNER_TEMP/evidence/attachments"
           fi
+          python3 - <<'PY'
+          import os, shutil
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          evidence = root / 'evidence'
+          compact = root / 'review'
+          for source in evidence.rglob('*'):
+              if source.is_file() and source.suffix.lower() in {'.png', '.jpg', '.jpeg', '.txt', '.json'}:
+                  target = compact / source.relative_to(evidence)
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(source, target)
+          PY
       - name: Require actual passed tests
         env:
           EXPECTED_TESTS: ${{ matrix.device == 'ipad-window' && '1' || '9' }}
@@ -92,11 +111,19 @@ jobs:
           name: qa-${{ matrix.device }}
           retention-days: 14
           path: |
-            ${{ runner.temp }}/qa.xcresult
-            ${{ runner.temp }}/evidence
+            ${{ runner.temp }}/review
+            ${{ runner.temp }}/build.log
             ${{ runner.temp }}/xcodebuild.log
             ${{ runner.temp }}/environment.json
             ${{ runner.temp }}/bundle-verification.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-full-${{ matrix.device }}
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/qa.xcresult
+            ${{ runner.temp }}/evidence
   package:
     name: Package verified SideStore IPA
     needs: simulator

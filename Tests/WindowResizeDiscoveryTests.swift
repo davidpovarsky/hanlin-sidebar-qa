@@ -284,8 +284,13 @@ final class WindowResizeDiscoveryTests: XCTestCase {
                 "The content did not move aside to reveal the actual compact sidebar.")
         } else {
             XCTAssertTrue(waitFor(timeout: 5) { !settings.exists }, "Covered sidebar controls remained exposed after closing.")
-            XCTAssertLessThan(toggle.frame.midX, frame.minX + 100,
+            XCTAssertTrue(waitFor(timeout: 5) { toggle.isHittable }, "Window controls occlude the closed sidebar toggle.")
+            XCTAssertTrue(frame.contains(CGPoint(x: toggle.frame.midX, y: toggle.frame.midY)))
+            let content = app.scrollViews["chat-history"].frame
+            XCTAssertEqual(content.minX, frame.minX, accuracy: 2,
                 "The content did not return to the leading edge after closing.")
+            XCTAssertEqual(content.width, frame.width, accuracy: 2,
+                "The closed content must fill the real window despite toolbar corner insets.")
         }
     }
 

@@ -22,6 +22,23 @@ private enum Theme {
     static let card = Color(uiColor: .secondarySystemGroupedBackground)
 }
 
+private extension View {
+    @ViewBuilder
+    func avoidingWindowControls() -> some View {
+        // Older SDKs already reserve a compatibility safe area. With the
+        // iOS 26 SDK, custom bars must adapt to the real window-control inset.
+        #if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            self.containerCornerOffset(.horizontal, sizeToFit: true)
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
 private struct DemoChat: Identifiable {
     let id: Int
     var title: String
@@ -147,6 +164,9 @@ struct ContentView: View {
                 sidebar
                     .environment(\.layoutDirection, contentLayoutDirection)
                     .frame(width: sidebarWidth, height: geometry.size.height)
+                    // Scope this layer's hit shape and visibility to its own
+                    // accessibility container, preserving each child control.
+                    .accessibilityElement(children: .contain)
                     .contentShape(Rectangle())
                     .scaleEffect(wide ? 1 : 0.86 + 0.14 * progress, anchor: .trailing)
                     .offset(x: wide ? 0 : 22 * (1 - progress))
@@ -160,6 +180,7 @@ struct ContentView: View {
                     .frame(width: wide && sidebarVisible ? width - sidebarWidth : width,
                            height: geometry.size.height)
                     .background(Color(uiColor: .systemBackground))
+                    .accessibilityElement(children: .contain)
                     // The hit region moves with the content, before its translation.
                     .contentShape(Rectangle())
                     .clipShape(RoundedRectangle(cornerRadius: wide ? 0 : 20 * progress))
@@ -169,6 +190,7 @@ struct ContentView: View {
             }
             // Bound the viewport's hit region as well as its visible drawing.
             .frame(width: width, height: geometry.size.height, alignment: .leading)
+            .accessibilityElement(children: .contain)
             .contentShape(Rectangle())
             .clipped()
             .environment(\.layoutDirection, .leftToRight)
@@ -438,12 +460,20 @@ private struct HistorySidebar: View {
             }
             Spacer()
             Button(action: onNew) {
-                Image(systemName: "plus.bubble").font(.title3)
+                Image(systemName: "plus.bubble")
+                    .font(.title3)
+                    .foregroundColor(.accentColor)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("שיחה חדשה")
             .accessibilityIdentifier("sidebar-new-chat")
         }
-        .padding(17)
+        .padding(.leading, 17)
+        .padding(.trailing, 8)
+        .padding(.vertical, 12)
+        .avoidingWindowControls()
     }
     
     private var searchBox: some View {
@@ -572,6 +602,7 @@ private struct CompactHomeWorkspace: View {
         }
         .padding(.horizontal, 19)
         .padding(.vertical, 15)
+        .avoidingWindowControls()
     }
     
     private var homeScroll: some View {
@@ -765,12 +796,16 @@ private struct ChatScreen: View {
     }
     
     private var chatToolbar: some View {
-        HStack(spacing: 15) {
+        HStack(spacing: 7) {
             Button {
                 onSidebar()
             } label: {
                 Image(systemName: "sidebar.left")
+                    .foregroundColor(.accentColor)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel("הצג סרגל שיחות")
             .accessibilityIdentifier("sidebar-toggle")
             .accessibilityValue(sidebarOpen ? "open" : "closed")
@@ -784,8 +819,10 @@ private struct ChatScreen: View {
         }
         .environment(\.layoutDirection, .leftToRight)
         .font(.title3)
-        .padding(.horizontal, 19)
-        .padding(.vertical, 15)
+        .padding(.leading, 11)
+        .padding(.trailing, 19)
+        .padding(.vertical, 3)
+        .avoidingWindowControls()
     }
 }
 
@@ -1136,6 +1173,7 @@ private struct LibraryScreen: View {
         }
         .font(.title3)
         .padding(18)
+        .avoidingWindowControls()
     }
     
     private var filterControls: some View {
