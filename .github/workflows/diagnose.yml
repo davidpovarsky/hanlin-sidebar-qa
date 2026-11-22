@@ -1,0 +1,66 @@
+name: Diagnose Simulator Results
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Existing simulator QA run to inspect
+        required: true
+        default: "44432809241"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    runs-on: macos-15
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN_ID: ${{ inputs.run_id }}
+    steps:
+      - name: Record installed Xcode SDKs and simulator runtimes
+        shell: bash
+        run: |
+          mkdir -p diagnostics/environment
+          sw_vers | tee diagnostics/environment/macos.txt
+          xcode-select -p | tee diagnostics/environment/selected-developer-directory.txt
+          ls -1d /Applications/Xcode*.app | tee diagnostics/environment/installed-xcode-apps.txt
+          for XCODE_APP in /Applications/Xcode*.app; do
+            XCODE_NAME=$(basename "$XCODE_APP" .app)
+            DEVELOPER_DIR="$XCODE_APP/Contents/Developer" xcodebuild -version > "diagnostics/environment/$XCODE_NAME-version.txt" 2>&1 || true
+            DEVELOPER_DIR="$XCODE_APP/Contents/Developer" xcodebuild -showsdks > "diagnostics/environment/$XCODE_NAME-sdks.txt" 2>&1 || true
+          done
+          xcrun simctl list runtimes -j | tee diagnostics/environment/simulator-runtimes.json
+          xcrun simctl list devices available -j > diagnostics/environment/simulator-devices.json
+          xcrun xcresulttool version > diagnostics/environment/xcresulttool-version.txt 2>&1 || true
+          cat diagnostics/environment/*-version.txt
+      - name: Download existing result bundle
+        shell: bash
+        run: |
+          [[ "$SOURCE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh run view "$SOURCE_RUN_ID" --json status,conclusion,headSha,url > diagnostics/source-run.json
+          gh run download "$SOURCE_RUN_ID" -n simulator-ui-results -D downloaded-results
+      - name: Export screenshots and structured test results
+        shell: bash
+        run: |
+          find downloaded-results -type d -name '*.xcresult' -print > diagnostics/xcresult-paths.txt
+          test -s diagnostics/xcresult-paths.txt
+          while IFS= read -r RESULT_PATH; do
+            RESULT_NAME=$(basename "$RESULT_PATH" .xcresult)
+            RESULT_OUTPUT="diagnostics/$RESULT_NAME"
+            mkdir -p "$RESULT_OUTPUT/attachments"
+            xcrun xcresulttool get test-results summary --path "$RESULT_PATH" > "$RESULT_OUTPUT/summary.json" 2> "$RESULT_OUTPUT/summary-errors.txt" || true
+            xcrun xcresulttool get test-results tests --path "$RESULT_PATH" > "$RESULT_OUTPUT/tests.json" 2> "$RESULT_OUTPUT/tests-errors.txt" || true
+            xcrun xcresulttool export attachments --path "$RESULT_PATH" --output-path "$RESULT_OUTPUT/attachments" > "$RESULT_OUTPUT/export.txt" 2>&1 || true
+            xcrun xcresulttool get object --legacy --format json --path "$RESULT_PATH" > "$RESULT_OUTPUT/legacy-result.json" 2> "$RESULT_OUTPUT/legacy-errors.txt" || true
+            cat "$RESULT_OUTPUT/summary.json"
+            cat "$RESULT_OUTPUT/export.txt"
+          done < diagnostics/xcresult-paths.txt
+          find diagnostics -type f -print > diagnostics/file-list.txt
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulator-diagnostic-evidence
+          path: diagnostics
+          retention-days: 14
