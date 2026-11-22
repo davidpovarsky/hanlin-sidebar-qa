@@ -2,6 +2,12 @@
 
 A self-contained SwiftUI prototype based on the original **My App 70.swiftpm** supplied in this conversation. It preserves the original sidebar and settings hierarchy. The example actions are local demonstrations; this repository does not contain the original Hanlin backend or API integration.
 
+## Current verification status — 2026-11-22
+
+The latest repair is commit `6848ed2d21eff7df10374ae87b184c5ff7a49cd3`. It has **not yet been compiled or run on a simulator**: GitHub rejected all three jobs in [run 45033895417](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45033895417) before any steps started, reporting failed account payments or a spending limit. No new verified IPA has been produced.
+
+The preceding [run 45030049611](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45030049611) compiled successfully with Xcode/iOS Simulator 26.2 and executed real UI tests. iPhone passed 2/9; iPad passed 4/9; the real-window test resized the app from 1180 × 820 to 375 × 625.5 points but failed at the occluded sidebar toggle. See [QA_STATUS.md](QA_STATUS.md) for diagnosed causes, changes and the exact continuation point.
+
 ## Navigation and layout
 
 - One `HistorySidebar` contains its header, search, quick actions, library, chats, and Settings button.
@@ -10,6 +16,7 @@ A self-contained SwiftUI prototype based on the original **My App 70.swiftpm** s
 - Covered sidebar controls do not receive touches or appear in accessibility. The existing toolbar control exposes the open/closed state.
 - iPad windows at least 640 points wide use two columns; smaller iPad windows and iPhones use the sliding reveal. The physical-left reveal is retained in RTL while sidebar contents follow the locale.
 - The application targets both iPhone and iPad, supplies a launch screen, supports all four iPad orientations, and omits the deprecated `UIRequiresFullScreen` compatibility key.
+- Custom top bars use the iOS 26 corner-inset API to avoid system window controls, with compiler and availability guards for older Swift Playgrounds SDKs.
 
 ## Build and simulator QA
 
