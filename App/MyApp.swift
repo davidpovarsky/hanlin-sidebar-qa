@@ -419,6 +419,7 @@ private struct HistorySidebar: View {
                 Label("הגדרות", systemImage: "gearshape")
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(17)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("sidebar-settings")
@@ -470,6 +471,7 @@ private struct HistorySidebar: View {
             Label(title, systemImage: icon)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(11)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -508,6 +510,7 @@ private struct HistoryChatRow: View {
             }
             .padding(10)
             .background(selected ? Theme.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("sidebar-chat-\(chat.id)")

@@ -139,8 +139,9 @@ final class HanlinSidebarQATests: XCTestCase {
         let option = app.switches["settings-example-toggle"]
         XCTAssertTrue(option.waitForExistence(timeout: 10))
         let oldValue = option.value as? String
+        XCTAssertTrue(oldValue == "0" || oldValue == "1", "Switch must expose its native on/off value")
         tapCenter(option)
-        wait(NSPredicate(format: "value != %@", oldValue ?? ""), on: option)
+        waitForValue(oldValue == "1" ? "0" : "1", on: option)
         navigateBackInSettings()
         XCTAssertTrue(app.buttons["settings-destination-generalSettings"].waitForExistence(timeout: 10))
         navigateBackInSettings()
@@ -320,5 +321,91 @@ final class HanlinSidebarQATests: XCTestCase {
         wait(NSPredicate { _, _ in self.window.frame.height > self.window.frame.width }, on: window)
         setSidebar(false)
         openSettings()
+    }
+
+    func testContextMenuUnpinsAndRepinsChat() {
+        setSidebar(true)
+        let chat = app.buttons["sidebar-chat-1"]
+        let otherPinnedChat = app.buttons["sidebar-chat-2"]
+        waitForValue("pinned", on: chat)
+        XCTAssertTrue(otherPinnedChat.waitForExistence(timeout: 10))
+        XCTAssertLessThan(chat.frame.midY, otherPinnedChat.frame.midY,
+                          "The seed chat should begin before chat 2 in the pinned section")
+        wait(NSPredicate { _, _ in chat.isHittable }, on: chat)
+        chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 1.1)
+        // These are the actual Hebrew labels in HistoryChatRow.contextMenu.
+        let unpin = app.buttons["בטל הצמדה"].firstMatch
+        tapCenter(unpin)
+        waitGone(unpin)
+        waitForValue("unpinned", on: chat)
+        requireSidebar(true)
+        XCTAssertGreaterThan(chat.frame.midY, otherPinnedChat.frame.midY,
+                             "Unpinning did not move the chat below the pinned section")
+
+        wait(NSPredicate { _, _ in chat.isHittable }, on: chat)
+        chat.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 1.1)
+        let pin = app.buttons["הצמד שיחה"].firstMatch
+        tapCenter(pin)
+        waitGone(pin)
+        waitForValue("pinned", on: chat)
+        requireSidebar(true)
+        XCTAssertLessThan(chat.frame.midY, otherPinnedChat.frame.midY,
+                          "Re-pinning did not return the chat to its pinned position")
+        // A completed context menu must leave ordinary sidebar taps usable.
+        tapCenter(settings)
+        XCTAssertTrue(app.buttons["settings-category-personal"].waitForExistence(timeout: 10))
+        tapCenter(app.buttons["settings-close"])
+        requireSidebar(true)
+    }
+
+    func testHebrewRTLRetainsPhysicalLeftRevealAndSettings() {
+        app.terminate()
+        app.launchArguments = [
+            "-ui-testing",
+            "-AppleLanguages", "(he)",
+            "-AppleLocale", "he_IL",
+            // Apple's documented iOS RTL test override also works before a
+            // prototype has a complete Hebrew localization in its bundle.
+            "-AppleTextDirection", "YES"
+        ]
+        app.launch()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20))
+        setSidebar(false)
+        setSidebar(true)
+
+        let newChat = app.buttons["sidebar-new-chat"]
+        XCTAssertTrue(newChat.waitForExistence(timeout: 10))
+        XCTAssertLessThan(newChat.frame.midX, settings.frame.midX,
+                          "RTL was not active inside the sidebar: its trailing new-chat button must mirror to the left")
+        XCTAssertLessThanOrEqual(settings.frame.maxX, toggle.frame.minX + 1,
+                                 "The physical-left sidebar overlaps the visible chat toggle in RTL")
+        let rtlSidebar = XCTAttachment(screenshot: app.screenshot())
+        rtlSidebar.name = "hebrew-rtl-open-sidebar"
+        rtlSidebar.lifetime = .keepAlways
+        add(rtlSidebar)
+        tapCenter(settings)
+        XCTAssertTrue(app.buttons["settings-category-personal"].waitForExistence(timeout: 10))
+        tapCenter(app.buttons["settings-close"])
+        requireSidebar(true)
+
+        if !isWide {
+            // Physical direction stays the accepted left-drawer direction even
+            // though the controls and Hebrew text use a right-to-left locale.
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5))
+                .press(forDuration: 0.05,
+                       thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.12, dy: 0.5)))
+            requireSidebar(false)
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+                .press(forDuration: 0.05,
+                       thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: 0.5)))
+            requireSidebar(true)
+        }
+        // Prove the same real toggle can close and fully reveal again in RTL.
+        setSidebar(false)
+        openSettings()
+        tapCenter(app.buttons["settings-close"])
+        requireSidebar(true)
     }
 }

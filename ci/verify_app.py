@@ -21,7 +21,10 @@ assert info['CFBundleSupportedPlatforms'] == [platform], info.get('CFBundleSuppo
 exe = app / info['CFBundleExecutable']
 assert exe.is_file()
 arch = subprocess.check_output(['lipo', '-archs', str(exe)], text=True).strip()
-assert 'arm64' in arch.split(), arch
+if platform == 'iPhoneOS':
+    assert 'arm64' in arch.split(), arch
+else:
+    assert {'arm64', 'x86_64'}.intersection(arch.split()), arch
 print(json.dumps({
     'bundle': str(app), 'bundleIdentifier': info['CFBundleIdentifier'],
     'families': info['UIDeviceFamily'], 'platform': platform, 'architectures': arch,

@@ -18,6 +18,7 @@ final class WindowResizeDiscoveryTests: XCTestCase {
     private let compactBoundary: CGFloat = 640
     private let requestedNarrowWidth: CGFloat = 480
     private var originalOrientation: UIDeviceOrientation = .unknown
+    private var applicationUnderTest: XCUIApplication?
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -26,6 +27,9 @@ final class WindowResizeDiscoveryTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        if testRun?.hasSucceeded == false, let app = applicationUnderTest {
+            attachState("failure-final-state", app: app)
+        }
         XCUIDevice.shared.orientation = originalOrientation == .unknown ? .portrait : originalOrientation
         try super.tearDownWithError()
     }
@@ -33,6 +37,7 @@ final class WindowResizeDiscoveryTests: XCTestCase {
     func testDiscoverSystemWindowControls() throws {
         try requireIPad()
         let app = XCUIApplication()
+        applicationUnderTest = app
         XCUIDevice.shared.orientation = .landscapeLeft
         let modeObserved = discoverAndSelectWindowedApps()
         app.launch()
@@ -66,6 +71,7 @@ final class WindowResizeDiscoveryTests: XCTestCase {
     func testActualIPadWindowNarrowAndRestore() throws {
         try requireIPad()
         let app = XCUIApplication()
+        applicationUnderTest = app
         XCUIDevice.shared.orientation = .landscapeLeft
         let modeObserved = discoverAndSelectWindowedApps()
         app.launch()
@@ -112,6 +118,10 @@ final class WindowResizeDiscoveryTests: XCTestCase {
             Inspect the open/closed narrow screenshots and frames if this runtime clips accessibility frames.
             """)
 
+        // These checks run inside the actual resized scene, before widening it.
+        // This remains one XCTest selector so CI's expected test count is one.
+        verifyNarrowWindowInteractions(app, referenceWidth: narrow.width)
+
         let restored = physicallyRestore(app, to: initial)
         let restoredSidebarOpened = openSidebarForMeasurement(app)
         let final = primaryWindow(in: app).frame
@@ -129,6 +139,9 @@ final class WindowResizeDiscoveryTests: XCTestCase {
             Narrow: \(narrow)
             Wide restored: \(final)
             Open-sidebar chat/window width ratios: \(initialContentRatio) → \(narrowContentRatio) → \(restoredContentRatio)
+            Narrow interactions verified: Settings/category/detail/switch/back/close;
+            content drags at three heights; closing from sidebar and visible content;
+            search keyboard, filtering, chat selection, and keyboard dismissal.
             Widths are XCUIElement window frames, not app-supplied labels or a test-only SwiftUI frame.
             """, name: "required-verified-window-geometry")
     }
@@ -137,6 +150,201 @@ final class WindowResizeDiscoveryTests: XCTestCase {
         guard UIDevice.current.userInterfaceIdiom == .pad else {
             throw XCTSkip("System window resizing is an iPad test; run this selector on an iPad simulator.")
         }
+    }
+
+    private func verifyNarrowWindowInteractions(_ app: XCUIApplication, referenceWidth: CGFloat) {
+        XCTContext.runActivity(named: "Real narrow window — Settings and nested navigation") { _ in
+            assertNarrowWindow(app, referenceWidth: referenceWidth)
+            setActualSidebar(app, open: true)
+            tapPhysicalControl(app.buttons["sidebar-settings"], in: app)
+            let personal = app.buttons["settings-category-personal"]
+            XCTAssertTrue(personal.waitForExistence(timeout: 10), "Physical Settings tap did not present its categories in the narrow window.")
+            attachState("narrow-settings-home", app: app)
+            tapPhysicalControl(personal, in: app)
+            tapPhysicalControl(app.buttons["settings-destination-profile"], in: app)
+
+            let option = app.switches["settings-example-toggle"]
+            XCTAssertTrue(option.waitForExistence(timeout: 10))
+            let previous = option.value as? String
+            XCTAssertTrue(previous == "0" || previous == "1", "The nested switch must expose its native state.")
+            tapPhysicalControl(option, in: app)
+            XCTAssertTrue(waitFor(timeout: 5) { option.value as? String == (previous == "1" ? "0" : "1") },
+                "The nested Settings switch did not respond to its physical tap.")
+            attachState("narrow-settings-profile-switch-changed", app: app)
+
+            navigateBackInSettings(app)
+            XCTAssertTrue(app.buttons["settings-destination-profile"].waitForExistence(timeout: 10))
+            navigateBackInSettings(app)
+            XCTAssertTrue(personal.waitForExistence(timeout: 10))
+            tapPhysicalControl(app.buttons["settings-close"], in: app)
+            XCTAssertTrue(waitFor(timeout: 10) { !personal.exists && !app.buttons["settings-close"].exists })
+            assertActualSidebar(app, open: true)
+            assertNarrowWindow(app, referenceWidth: referenceWidth)
+            attachState("narrow-settings-dismissed", app: app)
+        }
+
+        XCTContext.runActivity(named: "Real narrow window — drags from content and sidebar") { _ in
+            for (startX, y) in [(0.12, 0.20), (0.36, 0.50), (0.50, 0.78)] {
+                setActualSidebar(app, open: false)
+                dragInsideWindow(app, from: CGVector(dx: startX, dy: y),
+                    to: CGVector(dx: 0.97, dy: y), name: "open-content-y-\(y)")
+                assertActualSidebar(app, open: true)
+                attachState("narrow-open-from-content-y-\(y)", app: app)
+
+                // The right-hand strip is still visible while the sidebar is
+                // open; this exercises the shared gesture from that content.
+                dragInsideWindow(app, from: CGVector(dx: 0.94, dy: y),
+                    to: CGVector(dx: 0.10, dy: y), name: "close-content-y-\(y)")
+                assertActualSidebar(app, open: false)
+                assertNarrowWindow(app, referenceWidth: referenceWidth)
+            }
+
+            setActualSidebar(app, open: true)
+            let windowFrame = primaryWindow(in: app).frame
+            let sidebarRight = app.buttons["sidebar-settings"].frame.maxX
+            let sidebarX = (sidebarRight - windowFrame.minX - 24) / windowFrame.width
+            XCTAssertGreaterThan(sidebarX, 0.10)
+            XCTAssertLessThan(sidebarX, 0.90)
+            dragInsideWindow(app, from: CGVector(dx: sidebarX, dy: 0.55),
+                to: CGVector(dx: 0.04, dy: 0.55), name: "close-from-sidebar")
+            assertActualSidebar(app, open: false)
+            dragInsideWindow(app, from: CGVector(dx: 0.10, dy: 0.50),
+                to: CGVector(dx: 0.92, dy: 0.50), name: "reopen-after-sidebar-drag")
+            assertActualSidebar(app, open: true)
+            assertNarrowWindow(app, referenceWidth: referenceWidth)
+
+            // A successful drag must leave normal controls working afterward.
+            tapPhysicalControl(app.buttons["sidebar-settings"], in: app)
+            XCTAssertTrue(app.buttons["settings-category-personal"].waitForExistence(timeout: 10))
+            tapPhysicalControl(app.buttons["settings-close"], in: app)
+            XCTAssertTrue(waitFor(timeout: 10) { !app.buttons["settings-close"].exists })
+            assertActualSidebar(app, open: true)
+            attachState("narrow-settings-works-after-all-drag-surfaces", app: app)
+        }
+
+        XCTContext.runActivity(named: "Real narrow window — search, keyboard and chat selection") { _ in
+            setActualSidebar(app, open: true)
+            let search = app.descendants(matching: .any).matching(identifier: "sidebar-search").firstMatch
+            tapPhysicalControl(search, in: app)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "Search did not focus the software keyboard in the narrow scene.")
+            search.typeText("SwiftUI")
+            XCTAssertTrue(waitFor(timeout: 5) { search.value as? String == "SwiftUI" })
+            XCTAssertTrue(app.buttons["sidebar-chat-3"].waitForExistence(timeout: 10))
+            XCTAssertTrue(waitFor(timeout: 5) {
+                !app.buttons["sidebar-chat-1"].exists && !app.buttons["sidebar-chat-2"].exists
+            }, "The search field accepted text but did not filter the actual chat list.")
+            assertNarrowWindow(app, referenceWidth: referenceWidth)
+            attachState("narrow-search-filtered-with-keyboard", app: app)
+            selectActualChat(app, id: "3", expectedTitle: "תכנון אפליקציית SwiftUI")
+            attachState("narrow-filtered-chat-selected", app: app)
+
+            setActualSidebar(app, open: true)
+            tapPhysicalControl(search, in: app)
+            XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+            search.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: "SwiftUI".count))
+            XCTAssertTrue(app.buttons["sidebar-chat-1"].waitForExistence(timeout: 10), "Clearing the search did not restore the original chats.")
+            selectActualChat(app, id: "2", expectedTitle: "בניית אוטומציה")
+            assertNarrowWindow(app, referenceWidth: referenceWidth)
+            setActualSidebar(app, open: true)
+            attachState("narrow-search-cleared-second-chat-selected", app: app)
+        }
+    }
+
+    private func assertNarrowWindow(_ app: XCUIApplication, referenceWidth: CGFloat) {
+        let frame = primaryWindow(in: app).frame
+        XCTAssertGreaterThan(frame.width, 0)
+        XCTAssertLessThan(frame.width, compactBoundary, "The interaction escaped the actual narrow OS window: \(frame).")
+        XCTAssertEqual(frame.width, referenceWidth, accuracy: 12,
+            "A control interaction unexpectedly changed the OS window width.")
+    }
+
+    private func setActualSidebar(_ app: XCUIApplication, open: Bool) {
+        let toggle = app.buttons["sidebar-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        let expected = open ? "open" : "closed"
+        let state = toggle.value as? String
+        XCTAssertTrue(state == "open" || state == "closed", "The real sidebar control must expose its current state.")
+        if state != expected { tapPhysicalControl(toggle, in: app) }
+        assertActualSidebar(app, open: open)
+    }
+
+    private func assertActualSidebar(_ app: XCUIApplication, open: Bool) {
+        let toggle = app.buttons["sidebar-toggle"]
+        let settings = app.buttons["sidebar-settings"]
+        XCTAssertTrue(waitFor(timeout: 10) { toggle.exists && toggle.value as? String == (open ? "open" : "closed") },
+            "The actual sidebar did not become \(open ? "open" : "closed").")
+        let frame = primaryWindow(in: app).frame
+        if open {
+            XCTAssertTrue(settings.waitForExistence(timeout: 10))
+            XCTAssertTrue(waitFor(timeout: 5) { settings.isHittable }, "The sidebar reports open but its Settings control is not interactive.")
+            XCTAssertGreaterThan(settings.frame.width, 100)
+            XCTAssertGreaterThanOrEqual(settings.frame.minX, frame.minX - 1)
+            XCTAssertLessThanOrEqual(settings.frame.maxX, frame.maxX + 1)
+            XCTAssertGreaterThan(toggle.frame.minX, frame.minX + 150,
+                "The content did not move aside to reveal the actual compact sidebar.")
+        } else {
+            XCTAssertTrue(waitFor(timeout: 5) { !settings.exists }, "Covered sidebar controls remained exposed after closing.")
+            XCTAssertLessThan(toggle.frame.midX, frame.minX + 100,
+                "The content did not return to the leading edge after closing.")
+        }
+    }
+
+    private func tapPhysicalControl(_ element: XCUIElement, in app: XCUIApplication) {
+        XCTAssertTrue(element.waitForExistence(timeout: 10), "Missing control: \(element).")
+        XCTAssertTrue(waitFor(timeout: 5) { element.isHittable }, "Control is not hittable: \(elementDetails(element)).")
+        let frame = element.frame
+        XCTAssertGreaterThan(frame.width, 0)
+        XCTAssertGreaterThan(frame.height, 0)
+        XCTAssertTrue(primaryWindow(in: app).frame.contains(CGPoint(x: frame.midX, y: frame.midY)),
+            "The physical tap would fall outside the real app window: \(frame).")
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+    }
+
+    private func navigateBackInSettings(_ app: XCUIApplication) {
+        let buttons = app.navigationBars.buttons.matching(NSPredicate(format: "identifier != %@", "settings-close"))
+        guard let back = buttons.allElementsBoundByIndex.first(where: { $0.exists && $0.isHittable }) else {
+            XCTFail("The actual Settings navigation bar has no hittable native back control.")
+            return
+        }
+        tapPhysicalControl(back, in: app)
+    }
+
+    private func dragInsideWindow(_ app: XCUIApplication, from start: CGVector, to end: CGVector, name: String) {
+        let window = primaryWindow(in: app)
+        let origin = window.coordinate(withNormalizedOffset: start)
+        let destination = window.coordinate(withNormalizedOffset: end)
+        attachText("Window: \(window.frame)\nStart: \(origin.screenPoint)\nEnd: \(destination.screenPoint)", name: "narrow-gesture-" + name)
+        origin.press(forDuration: 0.05, thenDragTo: destination)
+    }
+
+    private func selectActualChat(_ app: XCUIApplication, id: String, expectedTitle: String) {
+        let row = app.buttons["sidebar-chat-" + id]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        let keyboard = app.keyboards.firstMatch
+        let center = CGPoint(x: row.frame.midX, y: row.frame.midY)
+        if !row.isHittable || !primaryWindow(in: app).frame.contains(center)
+            || (keyboard.exists && keyboard.frame.contains(center)) {
+            // On a short real window, the keyboard can cover the result. Close
+            // the actual drawer to resign search focus, then reopen the same
+            // filtered list; never resize the view or skip the selection check.
+            attachState("narrow-chat-\(id)-keyboard-covers-result", app: app)
+            setActualSidebar(app, open: false)
+            XCTAssertTrue(waitFor(timeout: 5) { !keyboard.exists }, "Closing the drawer did not dismiss the search keyboard.")
+            setActualSidebar(app, open: true)
+        }
+        let list = app.scrollViews["sidebar-chat-list"]
+        for _ in 0..<3 {
+            if row.exists && row.isHittable { break }
+            XCTAssertTrue(list.exists && list.isHittable, "The original chat list is not scrollable to its result.")
+            list.swipeUp()
+            assertActualSidebar(app, open: true)
+        }
+        tapPhysicalControl(row, in: app)
+        assertActualSidebar(app, open: false)
+        XCTAssertTrue(waitFor(timeout: 5) { !keyboard.exists }, "Selecting a real chat did not dismiss search focus.")
+        let title = app.staticTexts["chat-title"]
+        XCTAssertTrue(waitFor(timeout: 10) { title.exists && title.label == expectedTitle },
+            "Selecting chat \(id) did not display its actual conversation.")
     }
 
     /// Settings labels are candidate queries, not assumptions about the UI.
@@ -314,12 +522,14 @@ final class WindowResizeDiscoveryTests: XCTestCase {
     }
 
     private func primaryWindow(in app: XCUIApplication) -> XCUIElement {
-        // Exclude zero-sized transient windows and prefer the largest real app
-        // window, so a small system overlay cannot masquerade as a narrow scene.
-        app.windows.allElementsBoundByIndex
-            .filter { $0.exists && $0.frame.width > 0 && $0.frame.height > 0 }
-            .max { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
-            ?? app.windows.firstMatch
+        // Identify the actual app scene by its real controls. An iPad's software
+        // keyboard can be wider than a narrow scene, so choosing the largest
+        // window could otherwise mistake that system overlay for the app.
+        for identifier in ["sidebar-toggle", "settings-close"] {
+            let window = app.windows.containing(.button, identifier: identifier).firstMatch
+            if window.exists && window.frame.width > 0 && window.frame.height > 0 { return window }
+        }
+        return app.windows.firstMatch
     }
 
     private func visibleElement(named names: [String], in apps: [XCUIApplication], buttonsOnly: Bool = false) -> XCUIElement? {

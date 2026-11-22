@@ -8,16 +8,22 @@ on:
       - 'project.yml'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard macOS runner pool
+        type: choice
+        default: macos-15-intel
+        options: [macos-15-intel, macos-15, macos-26]
 permissions:
   contents: read
   actions: read
 concurrency:
-  group: ios-qa-${{ github.ref }}
+  group: ios-qa-${{ github.ref }}-${{ inputs.runner || 'macos-15-intel' }}
   cancel-in-progress: false
 jobs:
   simulator:
     name: UI tests (${{ matrix.device }})
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -69,7 +75,7 @@ jobs:
           fi
       - name: Require actual passed tests
         env:
-          EXPECTED_TESTS: ${{ matrix.device == 'ipad-window' && '1' || '7' }}
+          EXPECTED_TESTS: ${{ matrix.device == 'ipad-window' && '1' || '9' }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -94,7 +100,7 @@ jobs:
   package:
     name: Package verified SideStore IPA
     needs: simulator
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 20
     env:
       DEVICE_FAMILY: ipad
