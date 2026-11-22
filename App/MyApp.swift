@@ -176,9 +176,12 @@ struct ContentView: View {
             .onChange(of: geometry.size) { _, _ in resetDrag() }
             .onChange(of: dragActive) { _, active in
                 // A system interruption can cancel a gesture without onEnded.
-                if !active && dragOffset != 0 {
-                    let position = (compactSidebarVisible ? sidebarWidth : 0) + dragOffset
-                    setCompactSidebar(position > sidebarWidth * 0.5)
+                if !active {
+                    if dragOffset != 0 {
+                        let position = (compactSidebarVisible ? sidebarWidth : 0) + dragOffset
+                        setCompactSidebar(position > sidebarWidth * 0.5)
+                    }
+                    dragAxis = .undecided
                 }
             }
             .onChange(of: scenePhase) { _, phase in
@@ -1587,6 +1590,3 @@ private struct MiniAppDetailView: View {
         }
     }
 }
-
-// Observes horizontal swipes without cancelling touches on Buttons,
-// TextFields, ScrollViews or context menus in the sidebar.
