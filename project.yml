@@ -1,33 +1,56 @@
-﻿name: HanlinSidebarQA
+name: HanlinSidebarQA
 options:
   bundleIdPrefix: com.goldypov
+  deploymentTarget:
+    iOS: "17.0"
 settings:
   base:
-    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "5.0"
+    CODE_SIGNING_ALLOWED: NO
+    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "1.1.0"
 targets:
   HanlinSidebarQA:
     type: application
     platform: iOS
     sources: [App]
+    info:
+      path: Config/Info.plist
+      properties:
+        CFBundleDisplayName: Hanlin Sidebar
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.goldypov.hanlinsidebarqa
-        GENERATE_INFOPLIST_FILE: YES
         TARGETED_DEVICE_FAMILY: "1,2"
-        INFOPLIST_KEY_UIRequiresFullScreen: NO
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
-        CODE_SIGNING_ALLOWED: NO
+        SUPPORTS_MACCATALYST: NO
   HanlinSidebarQATests:
     type: bundle.ui-testing
     platform: iOS
     sources: [Tests]
-    dependencies: 
+    dependencies:
       - target: HanlinSidebarQA
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        CODE_SIGNING_ALLOWED: NO
-
+        TARGETED_DEVICE_FAMILY: "1,2"
+schemes:
+  HanlinSidebarQA:
+    build:
+      targets:
+        HanlinSidebarQA: all
+    test:
+      targets: [HanlinSidebarQATests]
+      gatherCoverageData: false
+      randomExecutionOrder: false

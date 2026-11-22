@@ -47,6 +47,14 @@ private enum QuickAction: String, Identifiable, CaseIterable {
     
     var id: String { rawValue }
     
+    var accessibilityKey: String {
+        switch self {
+        case .translate: "translate"
+        case .polish: "polish"
+        case .summarize: "summarize"
+        }
+    }
+
     var shortLabel: String {
         switch self {
         case .translate: "תרגום"
@@ -65,6 +73,10 @@ private enum QuickAction: String, Identifiable, CaseIterable {
 }
 
 struct ContentView: View {
+    @Environment(\.layoutDirection) private var contentLayoutDirection
+    @Environment(\.scenePhase) private var scenePhase
+    @GestureState private var dragActive = false
+    @FocusState private var sidebarSearchFocused: Bool
     @State private var chats: [DemoChat] = [
         .init(id: 1, title: "מחקר עם מקורות", summary: "חיפוש, Evidence ומקורות", pinned: true),
         .init(id: 2, title: "בניית אוטומציה", summary: "Skills ו־MCP", pinned: true),
@@ -123,97 +135,97 @@ struct ContentView: View {
     private func contentForWidth(_ width: CGFloat) -> some View {
         GeometryReader { geometry in
             let wide = UIDevice.current.userInterfaceIdiom != .phone && width >= 640
-            let sidebarWidth = wide ? min(295, geometry.size.width * 0.35) : min(310, geometry.size.width * 0.78)
+            let sidebarWidth = wide ? min(295, width * 0.35) : min(310, width * 0.78)
             let progress = wide ? (sidebarVisible ? CGFloat(1) : CGFloat(0)) :
                 min(1, max(0, (compactSidebarVisible ? CGFloat(1) : CGFloat(0)) + dragOffset / sidebarWidth))
+            let sidebarOpen = wide ? sidebarVisible : compactSidebarVisible
 
             ZStack(alignment: .leading) {
                 Theme.sidebar.ignoresSafeArea()
 
-                // Scale the ENTIRE original HistorySidebar as one unit.
+                // The original sidebar, including Settings, is one transformed layer.
                 sidebar
-                    .frame(width: sidebarWidth)
-                    .frame(maxHeight: .infinity)
+                    .environment(\.layoutDirection, contentLayoutDirection)
+                    .frame(width: sidebarWidth, height: geometry.size.height)
+                    .contentShape(Rectangle())
                     .scaleEffect(wide ? 1 : 0.86 + 0.14 * progress, anchor: .trailing)
                     .offset(x: wide ? 0 : 22 * (1 - progress))
                     .opacity(wide ? (sidebarVisible ? 1 : 0) : 0.72 + 0.28 * progress)
-                    // When fully revealed, the sidebar owns its entire hit-test region.
-                    // During dragging, the chat stays visually in front.
-                    .zIndex(!wide && compactSidebarVisible && dragOffset == 0 ? 2 : 0)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 14, coordinateSpace: .global)
-                            .onChanged { value in
-                                guard !wide, compactSidebarVisible else { return }
-                                let dx = value.translation.width
-                                let dy = value.translation.height
-                                if dragAxis == .undecided {
-                                    guard max(abs(dx), abs(dy)) > 12 else { return }
-                                    dragAxis = abs(dx) > abs(dy) * 1.3 ? .horizontal : .vertical
-                                }
-                                guard dragAxis == .horizontal else { return }
-                                var transaction = Transaction()
-                                transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    dragOffset = min(0, max(-sidebarWidth, dx))
-                                }
-                            }
-                            .onEnded { value in
-                                defer { dragAxis = .undecided }
-                                guard !wide, compactSidebarVisible, dragAxis == .horizontal else { return }
-                                let projected = min(sidebarWidth, max(0, sidebarWidth + value.predictedEndTranslation.width))
-                                withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
-                                    compactSidebarVisible = projected > sidebarWidth * 0.5
-                                    dragOffset = 0
-                                }
-                            }
-                    )
+                    .allowsHitTesting(sidebarOpen)
+                    .accessibilityHidden(!sidebarOpen)
+                    .zIndex(0)
 
                 workspace(wide: wide)
-                    .frame(width: wide && sidebarVisible ? max(0, geometry.size.width - sidebarWidth) : geometry.size.width)
-                    .frame(maxHeight: .infinity)
+                    .environment(\.layoutDirection, contentLayoutDirection)
+                    .frame(width: wide && sidebarVisible ? width - sidebarWidth : width,
+                           height: geometry.size.height)
                     .background(Color(uiColor: .systemBackground))
-                    .clipShape(RoundedRectangle(cornerRadius: !wide && progress > 0.001 ? 20 : 0))
-                    .shadow(color: .black.opacity(!wide && progress > 0.001 ? 0.13 : 0), radius: 18, x: -4)
-                    .offset(x: wide ? (sidebarVisible ? sidebarWidth : 0) : sidebarWidth * progress)
+                    // The hit region moves with the content, before its translation.
                     .contentShape(Rectangle())
-                    // The full-width chat must never intercept sidebar buttons.
-                    .allowsHitTesting(wide || !compactSidebarVisible || dragOffset != 0)
-                    .zIndex(!wide && compactSidebarVisible && dragOffset == 0 ? 0 : 1)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 14, coordinateSpace: .global)
-                            .onChanged { value in
-                                guard !wide, !settingsVisible, !miniAppsVisible else { return }
-                                let dx = value.translation.width
-                                let dy = value.translation.height
-                                if dragAxis == .undecided {
-                                    guard max(abs(dx), abs(dy)) > 12 else { return }
-                                    dragAxis = abs(dx) > abs(dy) * 1.3 ? .horizontal : .vertical
-                                }
-                                guard dragAxis == .horizontal else { return }
-                                var transaction = Transaction()
-                                transaction.disablesAnimations = true
-                                withTransaction(transaction) {
-                                    dragOffset = min(compactSidebarVisible ? 0 : sidebarWidth,
-                                                     max(compactSidebarVisible ? -sidebarWidth : 0, dx))
-                                }
-                            }
-                            .onEnded { value in
-                                defer { dragAxis = .undecided }
-                                guard !wide, dragAxis == .horizontal else { return }
-                                let projected = min(sidebarWidth, max(0,
-                                    (compactSidebarVisible ? sidebarWidth : 0) + value.predictedEndTranslation.width))
-                                let current = (compactSidebarVisible ? sidebarWidth : 0) + dragOffset
-                                let target = abs(value.predictedEndTranslation.width - value.translation.width) > 25
-                                    ? projected > sidebarWidth * 0.5
-                                    : current > sidebarWidth * 0.5
-                                withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
-                                    compactSidebarVisible = target
-                                    dragOffset = 0
-                                }
-                            }
-                    )
+                    .clipShape(RoundedRectangle(cornerRadius: wide ? 0 : 20 * progress))
+                    .shadow(color: .black.opacity(wide ? 0 : 0.13 * progress), radius: 18, x: -4)
+                    .offset(x: wide ? (sidebarVisible ? sidebarWidth : 0) : sidebarWidth * progress)
+                    .zIndex(1)
             }
+            // Bound the viewport's hit region as well as its visible drawing.
+            .frame(width: width, height: geometry.size.height, alignment: .leading)
+            .contentShape(Rectangle())
             .clipped()
+            .environment(\.layoutDirection, .leftToRight)
+            .simultaneousGesture(sidebarDrag(wide: wide, sidebarWidth: sidebarWidth))
+            .onChange(of: geometry.size) { _, _ in resetDrag() }
+            .onChange(of: dragActive) { _, active in
+                // A system interruption can cancel a gesture without onEnded.
+                if !active && dragOffset != 0 {
+                    let position = (compactSidebarVisible ? sidebarWidth : 0) + dragOffset
+                    setCompactSidebar(position > sidebarWidth * 0.5)
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { resetDrag() }
+            }
+        }
+    }
+
+    private func sidebarDrag(wide: Bool, sidebarWidth: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 14, coordinateSpace: .global)
+            .updating($dragActive) { _, active, _ in active = true }
+            .onChanged { value in
+                guard !wide, !settingsVisible, !miniAppsVisible, chosenAction == nil else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if dragAxis == .undecided {
+                    if abs(dx) > abs(dy) * 1.3 {
+                        dragAxis = .horizontal
+                    } else if abs(dy) > abs(dx) * 1.3 {
+                        dragAxis = .vertical
+                    }
+                }
+                guard dragAxis == .horizontal else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    dragOffset = min(compactSidebarVisible ? 0 : sidebarWidth,
+                                     max(compactSidebarVisible ? -sidebarWidth : 0, dx))
+                }
+            }
+            .onEnded { value in
+                defer { dragAxis = .undecided }
+                guard !wide, dragAxis == .horizontal else { return }
+                let initial = compactSidebarVisible ? sidebarWidth : 0
+                let projected = min(sidebarWidth, max(0, initial + value.predictedEndTranslation.width))
+                let current = initial + dragOffset
+                let moving = abs(value.predictedEndTranslation.width - value.translation.width) > 25
+                setCompactSidebar((moving ? projected : current) > sidebarWidth * 0.5)
+            }
+    }
+
+    private func resetDrag() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            dragOffset = 0
+            dragAxis = .undecided
         }
     }
 
@@ -249,6 +261,7 @@ struct ContentView: View {
                 toolsOn: $toolsOn,
                 thinkingOn: $thinkingOn,
                 isWide: wide,
+                sidebarOpen: wide ? sidebarVisible : compactSidebarVisible,
                 onSidebar: { toggleSidebar(wide: wide) },
                 onHome: { toggleSidebar(wide: wide) },
                 onMiniApps: { miniAppsVisible = true },
@@ -271,9 +284,13 @@ struct ContentView: View {
             selectedID: chatID,
             currentPage: page,
             search: $search,
+            searchFocused: $sidebarSearchFocused,
             onNew: newChat,
             onChat: selectChat,
-            onAction: { chosenAction = $0 },
+            onAction: {
+                sidebarSearchFocused = false
+                chosenAction = $0
+            },
             onLibrary: {
                 page = .knowledge
                 compactHomeVisible = false
@@ -282,6 +299,7 @@ struct ContentView: View {
             onSettings: {
                 // Present from the stable root without dismissing or moving
                 // the sidebar in the same update transaction.
+                sidebarSearchFocused = false
                 settingsVisible = true
             },
             onPin: togglePin
@@ -290,6 +308,7 @@ struct ContentView: View {
     
     private func toggleSidebar(wide: Bool) {
         if wide {
+            if sidebarVisible { sidebarSearchFocused = false }
             withAnimation(.easeInOut(duration: 0.2)) {
                 sidebarVisible.toggle()
             }
@@ -299,6 +318,7 @@ struct ContentView: View {
     }
 
     private func setCompactSidebar(_ open: Bool) {
+        if !open { sidebarSearchFocused = false }
         withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
             compactSidebarVisible = open
             dragOffset = 0
@@ -360,6 +380,7 @@ private struct HistorySidebar: View {
     let selectedID: Int
     let currentPage: DemoPage
     @Binding var search: String
+    let searchFocused: FocusState<Bool>.Binding
     let onNew: () -> Void
     let onChat: (Int) -> Void
     let onAction: (QuickAction) -> Void
@@ -389,6 +410,7 @@ private struct HistorySidebar: View {
                 }
                 .padding(12)
             }
+            .accessibilityIdentifier("sidebar-chat-list")
             Divider()
             Button(action: onSettings) {
                 Label("הגדרות", systemImage: "gearshape")
@@ -415,6 +437,7 @@ private struct HistorySidebar: View {
                 Image(systemName: "plus.bubble").font(.title3)
             }
             .accessibilityLabel("שיחה חדשה")
+            .accessibilityIdentifier("sidebar-new-chat")
         }
         .padding(17)
     }
@@ -423,6 +446,8 @@ private struct HistorySidebar: View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass").foregroundColor(.secondary)
             TextField("חיפוש שיחות והודעות", text: $search)
+                .accessibilityIdentifier("sidebar-search")
+                .focused(searchFocused)
         }
         .padding(10)
         .background(Color(uiColor: .tertiarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
@@ -432,6 +457,7 @@ private struct HistorySidebar: View {
     private var quickLinks: some View {
         VStack(spacing: 4) {
             sidebarButton("ספריית ידע", icon: "books.vertical", action: onLibrary)
+                .accessibilityIdentifier("sidebar-library")
         }
         .padding(12)
     }
@@ -481,6 +507,8 @@ private struct HistoryChatRow: View {
             .background(selected ? Theme.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar-chat-\(chat.id)")
+        .accessibilityValue(chat.pinned ? "pinned" : "unpinned")
         .contextMenu {
             Button(action: onPin) {
                 Label(chat.pinned ? "בטל הצמדה" : "הצמד שיחה", systemImage: chat.pinned ? "pin.slash" : "pin")
@@ -701,6 +729,7 @@ private struct ChatScreen: View {
     @Binding var toolsOn: Bool
     @Binding var thinkingOn: Bool
     let isWide: Bool
+    let sidebarOpen: Bool
     let onSidebar: () -> Void
     let onHome: () -> Void
     let onMiniApps: () -> Void
@@ -738,13 +767,16 @@ private struct ChatScreen: View {
             }
             .accessibilityLabel("הצג סרגל שיחות")
             .accessibilityIdentifier("sidebar-toggle")
+            .accessibilityValue(sidebarOpen ? "open" : "closed")
             
             Text(title)
+                .accessibilityIdentifier("chat-title")
                 .font(.headline)
                 .lineLimit(1)
             Spacer(minLength: 0)
             // No model / new-chat / settings buttons in chat title bar.
         }
+        .environment(\.layoutDirection, .leftToRight)
         .font(.title3)
         .padding(.horizontal, 19)
         .padding(.vertical, 15)
@@ -769,6 +801,7 @@ private struct ChatHistoryView: View {
             .padding(20)
             .frame(maxWidth: .infinity)
         }
+        .accessibilityIdentifier("chat-history")
     }
     
     private var emptyState: some View {
@@ -777,6 +810,7 @@ private struct ChatHistoryView: View {
                 .font(.system(size: 36))
                 .foregroundColor(Theme.accent)
             Text("במה נוכל לעזור?").font(.largeTitle.weight(.semibold))
+                .accessibilityIdentifier("chat-empty")
             Text("שיחה חדשה, חיפוש, תרגום, Skills, MCP ו־Knowledge — בלי סרגל טאבים.")
                 .foregroundColor(.secondary)
         }
@@ -805,6 +839,7 @@ private struct QuickActionsRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(action.rawValue)
+                .accessibilityIdentifier("sidebar-action-\(action.accessibilityKey)")
             }
         }
     }
@@ -892,6 +927,7 @@ private struct ChatComposerView: View {
                 .lineLimit(1...4)
                 .submitLabel(.send)
                 .onSubmit(onSend)
+                .accessibilityIdentifier("chat-input")
             Button {
                 microphonePreview.toggle()
             } label: {
@@ -905,6 +941,7 @@ private struct ChatComposerView: View {
             }
             .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             .accessibilityLabel("שלח הודעה")
+            .accessibilityIdentifier("chat-send")
         }
         .padding(12)
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 21))
@@ -994,13 +1031,16 @@ private struct QuickActionView: View {
                 Section("טקסט") {
                     TextField("הקלד טקסט", text: $input, axis: .vertical)
                         .lineLimit(3...6)
+                        .accessibilityIdentifier("quick-action-input")
                 }
                 Section {
                     Button("הצג תוצאה לדוגמה") { showResult = true }
+                        .accessibilityIdentifier("quick-action-run")
                 }
                 if showResult {
                     Section("דוגמה") {
                         Text("פעולת \(action.rawValue) קיימת בממשק Hanlin. השירות עצמו אינו מחובר לדוגמה זו.")
+                            .accessibilityIdentifier("quick-action-result")
                     }
                 }
             }
@@ -1008,6 +1048,7 @@ private struct QuickActionView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("סגור") { dismiss() }
+                        .accessibilityIdentifier("quick-action-close")
                 }
             }
         }
@@ -1064,6 +1105,7 @@ private struct LibraryScreen: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.bordered)
+            .accessibilityIdentifier("library-back")
             .padding(14)
         }
         .sheet(item: $selected) { doc in
@@ -1083,6 +1125,7 @@ private struct LibraryScreen: View {
             Button(action: onSidebar) { Image(systemName: "sidebar.left") }
             Spacer()
             Text("הספרייה").font(.headline)
+                .accessibilityIdentifier("library-title")
             Spacer()
         }
         .font(.title3)
@@ -1261,7 +1304,6 @@ private struct SettingsHomeView: View {
     var body: some View {
         NavigationStack {
             List {
-                Text("Settings").accessibilityIdentifier("settings-screen-marker")
                 Section("Customize Hanlin") {
                     categoryLink(SettingsData.personalization)
                     categoryLink(SettingsData.memory)
@@ -1303,6 +1345,7 @@ private struct SettingsHomeView: View {
                 Image(systemName: category.icon).foregroundColor(Theme.accent)
             }
         }
+        .accessibilityIdentifier("settings-category-\(category.id)")
     }
     
     private var closeButton: some ToolbarContent {
@@ -1311,6 +1354,7 @@ private struct SettingsHomeView: View {
                 Image(systemName: "xmark").font(.headline)
             }
             .accessibilityLabel("סגור הגדרות")
+            .accessibilityIdentifier("settings-close")
         }
     }
 }
@@ -1329,6 +1373,7 @@ private struct SettingsCategoryView: View {
                         Label(destination.title, systemImage: destination.icon)
                             .padding(.vertical, 5)
                     }
+                    .accessibilityIdentifier("settings-destination-\(destination.id)")
                 }
             }
         }
@@ -1336,6 +1381,8 @@ private struct SettingsCategoryView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onClose) { Image(systemName: "xmark") }
+                    .accessibilityLabel("סגור הגדרות")
+                    .accessibilityIdentifier("settings-close")
             }
         }
     }
@@ -1362,6 +1409,8 @@ private struct SettingsDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: onClose) { Image(systemName: "xmark") }
+                    .accessibilityLabel("סגור הגדרות")
+                    .accessibilityIdentifier("settings-close")
             }
         }
         .alert("הדגמה בלבד", isPresented: $showingInfo) {
@@ -1394,6 +1443,7 @@ private struct SettingsDetailView: View {
         } else {
             Section("אפשרויות") {
                 Toggle("פעיל בדוגמה", isOn: $exampleEnabled)
+                    .accessibilityIdentifier("settings-example-toggle")
                 Button("אפשרויות מתקדמות") { showingInfo = true }
             }
         }

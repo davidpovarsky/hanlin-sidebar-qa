@@ -1,48 +1,143 @@
-﻿name: iOS Simulator QA
+name: iOS Simulator QA
 on:
   push:
+    paths:
+      - 'App/**'
+      - 'Tests/**'
+      - 'ci/**'
+      - 'project.yml'
+      - '.github/workflows/ios.yml'
   workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ios-qa-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   simulator:
+    name: UI tests (${{ matrix.device }})
     runs-on: macos-15
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [iphone, ipad, ipad-window]
+    env:
+      DEVICE_FAMILY: ${{ matrix.device == 'iphone' && 'iphone' || 'ipad' }}
+      QA_KIND: ${{ matrix.device }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project
-        run: xcodegen generate
-      - name: Available simulators
-        run: xcrun simctl list devices available
-      - name: Build iOS simulator
-        run: xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA -sdk iphonesimulator -configuration Debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
-      - name: Run iPhone and iPad UI tests
+      - name: Select matching Xcode and simulator
+        run: python3 ci/select_simulator.py
+      - name: Install XcodeGen and generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -version
+          xcodebuild -project HanlinSidebarQA.xcodeproj -list
+      - name: Boot simulator with software keyboard
+        run: |
+          defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+          xcrun simctl boot "$SIMULATOR_ID" || true
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl status_bar "$SIMULATOR_ID" override --time 9:41 --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
+      - name: Run real UI interactions
         run: |
           set -o pipefail
-          for DEVICE_NAME in "iPhone 16" "iPad Air 11-inch (M3)"; do
-            SAFE_NAME=$(echo "$DEVICE_NAME" | tr -cs '[:alnum:]' '_')
-            xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA -destination "platform=iOS Simulator,name=$DEVICE_NAME,OS=26.2" -resultBundlePath "$RUNNER_TEMP/$SAFE_NAME.xcresult" CODE_SIGNING_ALLOWED=NO test
-          done
-      - name: Verify iPad multitasking Info.plist
+          if [[ "$QA_KIND" == "ipad-window" ]]; then
+            SELECTOR=HanlinSidebarQATests/WindowResizeDiscoveryTests/testActualIPadWindowNarrowAndRestore
+          else
+            SELECTOR=HanlinSidebarQATests/HanlinSidebarQATests
+          fi
+          xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA \
+            -configuration Debug -destination "platform=iOS Simulator,id=$SIMULATOR_ID" \
+            -derivedDataPath "$RUNNER_TEMP/derived" -resultBundlePath "$RUNNER_TEMP/qa.xcresult" \
+            -parallel-testing-enabled NO "-only-testing:$SELECTOR" CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/xcodebuild.log"
+      - name: Verify built universal and resizable application
         run: |
-          APP=$(find "$HOME/Library/Developer/Xcode/DerivedData" -path '*/Build/Products/Debug-iphonesimulator/HanlinSidebarQA.app' -type d | head -1)
-          test -n "$APP"
-          /usr/libexec/PlistBuddy -c 'Print :UIDeviceFamily' "$APP/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Print :UIRequiresFullScreen' "$APP/Info.plist" | grep -i false
-      - name: Upload test results
+          python3 ci/verify_app.py "$RUNNER_TEMP/derived/Build/Products/Debug-iphonesimulator/HanlinSidebarQA.app" iPhoneSimulator > "$RUNNER_TEMP/bundle-verification.json"
+      - name: Export screenshots and structured test results
         if: always()
-        uses: actions/upload-artifact@v4
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          if [[ -d "$RUNNER_TEMP/qa.xcresult" ]]; then
+            xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/qa.xcresult" > "$RUNNER_TEMP/evidence/summary.json"
+            xcrun xcresulttool get test-results tests --path "$RUNNER_TEMP/qa.xcresult" > "$RUNNER_TEMP/evidence/tests.json"
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/qa.xcresult" --output-path "$RUNNER_TEMP/evidence/attachments"
+          fi
+      - name: Require actual passed tests
+        env:
+          EXPECTED_TESTS: ${{ matrix.device == 'ipad-window' && '1' || '7' }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          s=json.loads(Path(os.environ['RUNNER_TEMP'], 'evidence/summary.json').read_text())
+          print(json.dumps(s, indent=2))
+          assert s['passedTests'] >= int(os.environ['EXPECTED_TESTS']), 'Missing executed UI tests'
+          assert s['failedTests'] == 0, 'Failed UI tests'
+          assert s['skippedTests'] == 0, 'Skipped UI tests'
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: simulator-ui-results
-          path: ${{ runner.temp }}/*.xcresult
-      - name: Build unsigned iOS device app
-        if: always()
-        run: xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA -sdk iphoneos -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/device" CODE_SIGNING_ALLOWED=NO build
-      - name: Upload simulator and device app
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hanlin-build-outputs
+          name: qa-${{ matrix.device }}
+          retention-days: 14
           path: |
-            ${{ runner.temp }}/device/Build/Products/Release-iphoneos/HanlinSidebarQA.app
-            ${{ runner.temp }}/hanlin-ui.xcresult
+            ${{ runner.temp }}/qa.xcresult
+            ${{ runner.temp }}/evidence
+            ${{ runner.temp }}/xcodebuild.log
+            ${{ runner.temp }}/environment.json
+            ${{ runner.temp }}/bundle-verification.json
+  package:
+    name: Package verified SideStore IPA
+    needs: simulator
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVICE_FAMILY: ipad
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: python3 ci/select_simulator.py
+      - name: Build release for physical iPhone and iPad
+        run: |
+          set -o pipefail
+          brew install xcodegen
+          xcodegen generate
+          xcodebuild -project HanlinSidebarQA.xcodeproj -scheme HanlinSidebarQA \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/device" CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" build | tee "$RUNNER_TEMP/device-build.log"
+      - name: Verify and package unsigned IPA
+        run: |
+          APP="$RUNNER_TEMP/device/Build/Products/Release-iphoneos/HanlinSidebarQA.app"
+          mkdir -p "$RUNNER_TEMP/export/Payload"
+          python3 ci/verify_app.py "$APP" iPhoneOS > "$RUNNER_TEMP/export/bundle-verification.json"
+          ditto "$APP" "$RUNNER_TEMP/export/Payload/HanlinSidebarQA.app"
+          cd "$RUNNER_TEMP/export"
+          /usr/bin/zip -qry HanlinSidebarQA.ipa Payload
+          shasum -a 256 HanlinSidebarQA.ipa > HanlinSidebarQA.ipa.sha256
+          printf '%s\n' "$GITHUB_SHA" > tested-commit.txt
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('HanlinSidebarQA.ipa') as z:
+              names=z.namelist()
+              assert 'Payload/HanlinSidebarQA.app/Info.plist' in names
+              exe=z.getinfo('Payload/HanlinSidebarQA.app/HanlinSidebarQA')
+              assert (exe.external_attr >> 16) & 0o111, 'Executable permissions missing'
+              assert all('\\' not in p for p in names), 'Invalid Windows ZIP separators'
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HanlinSidebarQA-SideStore
+          retention-days: 30
+          path: |
+            ${{ runner.temp }}/export/*.ipa
+            ${{ runner.temp }}/export/*.sha256
+            ${{ runner.temp }}/export/tested-commit.txt
+            ${{ runner.temp }}/export/bundle-verification.json
+            ${{ runner.temp }}/device-build.log
