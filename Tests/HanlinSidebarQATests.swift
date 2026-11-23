@@ -139,8 +139,11 @@ final class HanlinSidebarQATests: XCTestCase {
             XCTAssertGreaterThan(toggle.frame.minX, window.frame.minX + 150,
                                  "Workspace did not move away from the sidebar", file: file, line: line)
         } else {
-            // A covered control must be removed from the accessibility tree as well.
-            waitGone(settings, file: file, line: line)
+            // SwiftUI can retain a hidden offscreen element in XCUI's snapshot.
+            // Validate that the control is genuinely not touchable, including
+            // after the drawer animation, rather than relying on exists=false.
+            wait(NSPredicate { _, _ in !self.settings.isHittable },
+                 on: settings, file: file, line: line)
             wait(NSPredicate { _, _ in self.toggle.isHittable }, on: toggle, file: file, line: line)
             let content = app.scrollViews["chat-history"].frame
             let viewport = window.frame

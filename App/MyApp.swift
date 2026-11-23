@@ -371,6 +371,12 @@ struct ContentView: View {
     }
     
     private func selectChat(_ id: Int) {
+        // End editing before the searched row disappears and the drawer
+        // animates away. A focus-state update alone may leave UIKit's
+        // responder/keyboard active after the TextField is removed.
+        sidebarSearchFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
         chatID = id
         page = .chat
         compactHomeVisible = false
