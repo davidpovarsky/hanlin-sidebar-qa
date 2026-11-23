@@ -167,7 +167,12 @@ final class WindowResizeDiscoveryTests: XCTestCase {
             XCTAssertTrue(option.waitForExistence(timeout: 10))
             let previous = option.value as? String
             XCTAssertTrue(previous == "0" || previous == "1", "The nested switch must expose its native state.")
-            tapPhysicalControl(option, in: app)
+            // The parent SwiftUI Toggle spans the whole Form row; tapping
+            // its center misses the actual small UISwitch on iPadOS.
+            let nativeSwitch = option.switches.firstMatch
+            XCTAssertTrue(nativeSwitch.waitForExistence(timeout: 5))
+            XCTAssertLessThan(nativeSwitch.frame.width, option.frame.width)
+            tapPhysicalControl(nativeSwitch, in: app)
             XCTAssertTrue(waitFor(timeout: 5) { option.value as? String == (previous == "1" ? "0" : "1") },
                 "The nested Settings switch did not respond to its physical tap.")
             attachState("narrow-settings-profile-switch-changed", app: app)

@@ -192,7 +192,14 @@ final class HanlinSidebarQATests: XCTestCase {
         XCTAssertTrue(option.waitForExistence(timeout: 10))
         let oldValue = option.value as? String
         XCTAssertTrue(oldValue == "0" || oldValue == "1", "Switch must expose its native on/off value")
-        tapCenter(option)
+        // A Form Toggle exposes the entire row as a parent Switch. Its
+        // actual tappable UISwitch is the nested child, not the row midpoint.
+        let nativeSwitch = option.switches.firstMatch
+        XCTAssertTrue(nativeSwitch.waitForExistence(timeout: 5),
+                      "Expected the physical UISwitch inside the accessibility row")
+        XCTAssertLessThan(nativeSwitch.frame.width, option.frame.width,
+                          "Native UISwitch must have a distinct physical target")
+        tapCenter(nativeSwitch)
         waitForValue(oldValue == "1" ? "0" : "1", on: option)
         navigateBackInSettings()
         XCTAssertTrue(app.buttons["settings-destination-generalSettings"].waitForExistence(timeout: 10))
