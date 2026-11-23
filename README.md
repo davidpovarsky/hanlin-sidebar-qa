@@ -2,9 +2,11 @@
 
 A self-contained SwiftUI prototype based on the original **My App 70.swiftpm** supplied in this conversation. It preserves the original sidebar and settings hierarchy. The example actions are local demonstrations; this repository does not contain the original Hanlin backend or API integration.
 
-## Current verification status — 2026-11-22
+## Current verification status — 2026-11-23
 
 The latest repair is commit `6848ed2d21eff7df10374ae87b184c5ff7a49cd3`. It has **not yet been compiled or run on a simulator**: GitHub rejected all three jobs in [run 45033895417](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45033895417) before any steps started, reporting failed account payments or a spending limit. No new verified IPA has been produced.
+
+A fresh retry on November 23 and a dispatch to the alternate standard `macos-15` pool encountered the same billing restriction before execution. The source remains ready for verification once GitHub permits the runs.
 
 The preceding [run 45030049611](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45030049611) compiled successfully with Xcode/iOS Simulator 26.2 and executed real UI tests. iPhone passed 2/9; iPad passed 4/9; the real-window test resized the app from 1180 × 820 to 375 × 625.5 points but failed at the occluded sidebar toggle. See [QA_STATUS.md](QA_STATUS.md) for diagnosed causes, changes and the exact continuation point.
 

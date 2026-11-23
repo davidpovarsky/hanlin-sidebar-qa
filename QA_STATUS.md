@@ -1,4 +1,13 @@
-# Simulator verification checkpoint — 2026-11-22
+# Simulator verification checkpoint — 2026-11-23
+
+## Fresh retry on 2026-11-23
+
+The user requested progress again, so the failed workflow was retried and an alternate standard runner pool was tested with identical app, test and CI source.
+
+- [Run 45033895417, attempt 2](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45033895417/attempts/2), commit `6848ed2`, was queued at 20:59 UTC. All three simulator jobs failed before any steps, with the same billing/spending-limit annotation. The device-package job was skipped.
+- [Alternate run 45266039008](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45266039008), standard `macos-15` pool, commit `1dffb0a`, was dispatched at 21:05 UTC. A Git diff first confirmed that this documentation commit has identical `App`, `Tests`, `ci`, `project.yml` and workflow contents. Both iPad jobs failed before any steps with the same billing annotation. The ARM pool also reported a separate capacity-delay notice. Once those failures were confirmed, cancellation was requested for the remaining queued work.
+
+Neither attempt compiled the repair, executed a simulator assertion or produced a new IPA. No billing settings, repository visibility or unrelated jobs were changed. Current connected devices still provide no existing Mac fallback. The execution blocker therefore remains unresolved.
 
 ## Current blocker
 
