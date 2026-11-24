@@ -422,10 +422,13 @@ private struct PhysicalSidebarPan: UIViewRepresentable {
         }
 
         func install(in window: UIWindow?) {
-            guard installedWindow !== window else { return }
-            installedWindow?.removeGestureRecognizer(pan)
-            installedWindow = window
-            window?.addGestureRecognizer(pan)
+            if installedWindow !== window {
+                installedWindow?.removeGestureRecognizer(pan)
+                installedWindow = window
+                window?.addGestureRecognizer(pan)
+            }
+            // Resizing or dismissing a presentation updates configuration while
+            // retaining the same window and recognizer. Refresh its enabled state.
             pan.isEnabled = configuration.enabled
         }
 
