@@ -92,7 +92,6 @@ private enum QuickAction: String, Identifiable, CaseIterable {
 struct ContentView: View {
     @Environment(\.layoutDirection) private var contentLayoutDirection
     @Environment(\.scenePhase) private var scenePhase
-    @GestureState private var dragActive = false
     @FocusState private var sidebarSearchFocused: Bool
     @State private var chats: [DemoChat] = [
         .init(id: 1, title: "מחקר עם מקורות", summary: "חיפוש, Evidence ומקורות", pinned: true),
@@ -118,8 +117,6 @@ struct ContentView: View {
     @State private var compactSidebarVisible = false
     @State private var compactHomeVisible = false
     @State private var dragOffset: CGFloat = 0
-    @State private var dragAxis: SidebarDragAxis = .undecided
-    private enum SidebarDragAxis { case undecided, horizontal, vertical }
     @State private var search = ""
     @State private var draft = ""
     @State private var settingsVisible = false
@@ -130,6 +127,18 @@ struct ContentView: View {
     @State private var toolsOn = true
     @State private var thinkingOn = false
     
+    // The prototype has Hebrew content even without a localized bundle.
+    // Honor the actual app language/locale rather than the physical LTR drawer.
+    private var interfaceDirection: LayoutDirection {
+        if contentLayoutDirection == .rightToLeft ||
+            UIView.userInterfaceLayoutDirection(for: .unspecified) == .rightToLeft ||
+            Locale.current.language.characterDirection == .rightToLeft ||
+            Locale.preferredLanguages.first.map({ Locale.Language(identifier: $0).characterDirection == .rightToLeft }) == true {
+            return .rightToLeft
+        }
+        return .leftToRight
+    }
+
     private var chatTitle: String {
         chats.first(where: { $0.id == chatID })?.title ?? "שיחה חדשה"
     }
@@ -162,7 +171,7 @@ struct ContentView: View {
 
                 // The original sidebar, including Settings, is one transformed layer.
                 sidebar
-                    .environment(\.layoutDirection, contentLayoutDirection)
+                    .environment(\.layoutDirection, interfaceDirection)
                     .frame(width: sidebarWidth, height: geometry.size.height)
                     // Scope this layer's hit shape and visibility to its own
                     // accessibility container, preserving each child control.
@@ -176,7 +185,7 @@ struct ContentView: View {
                     .zIndex(0)
 
                 workspace(wide: wide)
-                    .environment(\.layoutDirection, contentLayoutDirection)
+                    .environment(\.layoutDirection, interfaceDirection)
                     .frame(width: wide && sidebarVisible ? width - sidebarWidth : width,
                            height: geometry.size.height)
                     .background(Color(uiColor: .systemBackground))
@@ -194,55 +203,30 @@ struct ContentView: View {
             .contentShape(Rectangle())
             .clipped()
             .environment(\.layoutDirection, .leftToRight)
-            .simultaneousGesture(sidebarDrag(wide: wide, sidebarWidth: sidebarWidth))
-            .onChange(of: geometry.size) { _, _ in resetDrag() }
-            .onChange(of: dragActive) { _, active in
-                // A system interruption can cancel a gesture without onEnded.
-                if !active {
-                    if dragOffset != 0 {
-                        let position = (compactSidebarVisible ? sidebarWidth : 0) + dragOffset
-                        setCompactSidebar(position > sidebarWidth * 0.5)
+            .background {
+                PhysicalSidebarPan(
+                    enabled: !wide && !settingsVisible && !miniAppsVisible && chosenAction == nil,
+                    isOpen: compactSidebarVisible,
+                    onMove: { dx in
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            dragOffset = min(compactSidebarVisible ? 0 : sidebarWidth,
+                                             max(compactSidebarVisible ? -sidebarWidth : 0, dx))
+                        }
+                    },
+                    onFinish: { dx, velocity, cancelled in
+                        let initial = compactSidebarVisible ? sidebarWidth : 0
+                        let projected = initial + dx + (cancelled ? 0 : velocity * 0.15)
+                        setCompactSidebar(projected > sidebarWidth * 0.5)
                     }
-                    dragAxis = .undecided
-                }
+                )
             }
+            .onChange(of: geometry.size) { _, _ in resetDrag() }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { resetDrag() }
             }
         }
-    }
-
-    private func sidebarDrag(wide: Bool, sidebarWidth: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 14, coordinateSpace: .global)
-            .updating($dragActive) { _, active, _ in active = true }
-            .onChanged { value in
-                guard !wide, !settingsVisible, !miniAppsVisible, chosenAction == nil else { return }
-                let dx = value.translation.width
-                let dy = value.translation.height
-                if dragAxis == .undecided {
-                    if abs(dx) > abs(dy) * 1.3 {
-                        dragAxis = .horizontal
-                    } else if abs(dy) > abs(dx) * 1.3 {
-                        dragAxis = .vertical
-                    }
-                }
-                guard dragAxis == .horizontal else { return }
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    dragOffset = min(compactSidebarVisible ? 0 : sidebarWidth,
-                                     max(compactSidebarVisible ? -sidebarWidth : 0, dx))
-                }
-            }
-            .onEnded { value in
-                defer { dragAxis = .undecided }
-                guard !wide, dragAxis == .horizontal else { return }
-                let initial = compactSidebarVisible ? sidebarWidth : 0
-                let projected = min(sidebarWidth, max(0, initial + value.predictedEndTranslation.width))
-                let current = initial + dragOffset
-                let moving = abs(value.predictedEndTranslation.width - value.translation.width) > 25
-                setCompactSidebar((moving ? projected : current) > sidebarWidth * 0.5)
-            }
     }
 
     private func resetDrag() {
@@ -250,7 +234,6 @@ struct ContentView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             dragOffset = 0
-            dragAxis = .undecided
         }
     }
 
@@ -347,7 +330,6 @@ struct ContentView: View {
         withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
             compactSidebarVisible = open
             dragOffset = 0
-            dragAxis = .undecided
         }
     }
     
@@ -405,6 +387,107 @@ struct ContentView: View {
 }
 
 // MARK: History / original ListView
+
+// Observe physical horizontal pans from the stable window instead of a
+// translated SwiftUI child. In narrow iPad windows a drag can otherwise lose
+// its recognizer when the workspace moves or a scroll view claims the touch.
+private struct PhysicalSidebarPan: UIViewRepresentable {
+    var enabled: Bool
+    var isOpen: Bool
+    var onMove: (CGFloat) -> Void
+    var onFinish: (CGFloat, CGFloat, Bool) -> Void
+
+    final class Anchor: UIView {
+        var windowChanged: ((UIWindow?) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            windowChanged?(window)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var configuration: PhysicalSidebarPan
+        weak var anchor: Anchor?
+        weak var installedWindow: UIWindow?
+        private lazy var pan: UIPanGestureRecognizer = {
+            let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+            recognizer.maximumNumberOfTouches = 1
+            recognizer.cancelsTouchesInView = true
+            recognizer.delegate = self
+            return recognizer
+        }()
+
+        init(_ configuration: PhysicalSidebarPan) {
+            self.configuration = configuration
+        }
+
+        func install(in window: UIWindow?) {
+            guard installedWindow !== window else { return }
+            installedWindow?.removeGestureRecognizer(pan)
+            installedWindow = window
+            window?.addGestureRecognizer(pan)
+            pan.isEnabled = configuration.enabled
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard configuration.enabled, let anchor, anchor.window === installedWindow else { return false }
+            guard installedWindow?.rootViewController?.presentedViewController == nil else { return false }
+            return anchor.bounds.contains(touch.location(in: anchor))
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard configuration.enabled, let window = installedWindow else { return false }
+            let v = pan.velocity(in: window)
+            guard abs(v.x) > abs(v.y) * 1.3 else { return false }
+            return configuration.isOpen ? v.x < 0 : v.x > 0
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+            // Vertical scrolls and native controls continue to work; the
+            // direction gate above decides whether the drawer participates.
+            true
+        }
+
+        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let window = installedWindow, configuration.enabled else { return }
+            let dx = recognizer.translation(in: window).x
+            switch recognizer.state {
+            case .began, .changed:
+                configuration.onMove(dx)
+            case .ended:
+                configuration.onFinish(dx, recognizer.velocity(in: window).x, false)
+            case .cancelled, .failed:
+                configuration.onFinish(dx, 0, true)
+            default:
+                break
+            }
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> Anchor {
+        let view = Anchor()
+        view.isUserInteractionEnabled = false
+        view.isAccessibilityElement = false
+        view.windowChanged = { [weak coordinator = context.coordinator] window in
+            coordinator?.install(in: window)
+        }
+        context.coordinator.anchor = view
+        return view
+    }
+
+    func updateUIView(_ uiView: Anchor, context: Context) {
+        context.coordinator.configuration = self
+        context.coordinator.install(in: uiView.window)
+    }
+
+    static func dismantleUIView(_ uiView: Anchor, coordinator: Coordinator) {
+        uiView.windowChanged = nil
+        coordinator.install(in: nil)
+    }
+}
 
 private struct HistorySidebar: View {
     let chats: [DemoChat]
