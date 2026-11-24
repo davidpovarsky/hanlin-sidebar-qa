@@ -2,13 +2,13 @@
 
 A self-contained SwiftUI prototype based on the original **My App 70.swiftpm** supplied in this conversation. It preserves the original sidebar and settings hierarchy. The example actions are local demonstrations; this repository does not contain the original Hanlin backend or API integration.
 
-## Current verification status — 2026-11-23
+## Verification and release gate
 
-The latest repair is commit `6848ed2d21eff7df10374ae87b184c5ff7a49cd3`. It has **not yet been compiled or run on a simulator**: GitHub rejected all three jobs in [run 45033895417](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45033895417) before any steps started, reporting failed account payments or a spending limit. No new verified IPA has been produced.
+The current delivery path runs native compilation, simulator tests and unsigned device packaging on the Scaleway Mac. A release is qualified only when the original iPhone 9, iPad 9 and actual iPad-window 1 cases all pass on the same source commit, with zero failures or skips. A successful build or results from an older source revision do not satisfy this gate.
 
-A fresh retry on November 23 and a dispatch to the alternate standard `macos-15` pool encountered the same billing restriction before execution. The source remains ready for verification once GitHub permits the runs.
+Release evidence identifies the tested commit, toolchain, actual case identities, device/runtime, screenshots and raw results. The SideStore package is accompanied by its SHA-256, bundle verification and complete matrix receipt. Installation and frame pacing on a physical iPad remain separate observations.
 
-The preceding [run 45030049611](https://github.com/davidpovarsky/hanlin-sidebar-qa/actions/runs/45030049611) compiled successfully with Xcode/iOS Simulator 26.2 and executed real UI tests. iPhone passed 2/9; iPad passed 4/9; the real-window test resized the app from 1180 × 820 to 375 × 625.5 points but failed at the occluded sidebar toggle. See [QA_STATUS.md](QA_STATUS.md) for diagnosed causes, changes and the exact continuation point.
+Earlier repairs, GitHub runner failures and diagnostic results are retained in [QA_STATUS.md](QA_STATUS.md) as historical evidence; they are not a qualification of a newer release.
 
 ## Navigation and layout
 
@@ -22,9 +22,9 @@ The preceding [run 45030049611](https://github.com/davidpovarsky/hanlin-sidebar-
 
 ## Build and simulator QA
 
-Generate the Xcode project with `xcodegen generate`. The deployment target is iOS 17.0. The GitHub workflow selects an installed Xcode whose SDK matches an installed simulator runtime, rather than using an older runner default.
+Generate the Xcode project with `xcodegen generate`. The deployment target is iOS 18.0, the minimum for the public `UIGestureRecognizerRepresentable` API that attaches the sidebar pan to its SwiftUI viewport. SwiftUI owns its lifetime and action delivery; the effect does not install a recognizer on the shared `UIWindow`. The GitHub workflow selects an installed Xcode whose SDK matches an installed simulator runtime, rather than using an older runner default.
 
-The workflow runs independent iPhone, iPad, and actual iPad-window tests. Assertions cover visible state transitions, physical coordinate taps and drags, nested Settings navigation and dismissal, search and software keyboard, chat selection and creation, sending a local message, all quick actions, library, pinning, RTL, vertical scrolling, and rotation.
+QA comprises independent iPhone, iPad, and actual iPad-window tests. Assertions cover visible state transitions, physical coordinate taps and drags, nested Settings navigation and dismissal, search and software keyboard, chat selection and creation, sending a local message, all quick actions, library, pinning, RTL, vertical scrolling, and rotation.
 
 The iPad-window gate uses Settings and OS window controls to shrink the real application window below 640 points, checks compact layout and interaction in that window, then restores it. No test-only view width substitutes for system resizing. The diagnostic selector only collects evidence and is not a passing resize gate.
 
@@ -32,6 +32,6 @@ Results include `.xcresult`, screenshots, accessibility hierarchies, simulator/X
 
 ## IPA for SideStore
 
-The device Release build is made on macOS from the same commit tested by the workflow. It is deliberately unsigned so SideStore can sign it with the installing account. Packaging preserves the macOS executable permissions and the ZIP path `Payload/HanlinSidebarQA.app/Info.plist`. The workflow verifies that path, checks device platform and ARM64 architecture, validates the built Info.plist, and includes a SHA-256 and tested commit identifier beside the IPA.
+The device Release build is made on macOS from the same commit qualified by all three QA stages. It is deliberately unsigned so SideStore can sign it with the installing account. Packaging preserves the macOS executable permissions and the ZIP path `Payload/HanlinSidebarQA.app/Info.plist`. The workflow verifies that path, checks device platform and ARM64 architecture, validates the built Info.plist, and includes a SHA-256 and tested commit identifier beside the IPA.
 
-Simulator QA verifies the prototype interactions; installation through an individual SideStore account and frame pacing on physical hardware require that hardware. Test evidence should always be associated with its exact Git commit and workflow run.
+Simulator QA verifies the prototype interactions; installation through an individual SideStore account and frame pacing on physical hardware require that hardware. Test evidence should always be associated with its exact Git commit and native run identifier.

@@ -203,10 +203,11 @@ struct ContentView: View {
             .contentShape(Rectangle())
             .clipped()
             .environment(\.layoutDirection, .leftToRight)
-            .background {
+            .gesture(
                 PhysicalSidebarPan(
                     enabled: !wide && !settingsVisible && !miniAppsVisible && chosenAction == nil,
                     isOpen: compactSidebarVisible,
+                    size: CGSize(width: width, height: geometry.size.height),
                     onMove: { dx in
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
@@ -221,7 +222,7 @@ struct ContentView: View {
                         setCompactSidebar(projected > sidebarWidth * 0.5)
                     }
                 )
-            }
+            )
             .onChange(of: geometry.size) { _, _ in resetDrag() }
             .onChange(of: scenePhase) { _, phase in
                 if phase != .active { resetDrag() }
@@ -388,107 +389,81 @@ struct ContentView: View {
 
 // MARK: History / original ListView
 
-// Observe physical horizontal pans from the stable window instead of a
-// translated SwiftUI child. In narrow iPad windows a drag can otherwise lose
-// its recognizer when the workspace moves or a scroll view claims the touch.
-private struct PhysicalSidebarPan: UIViewRepresentable {
+// UIKit performs axis arbitration while SwiftUI owns this recognizer's
+// lifetime, target action and scope in the fixed viewport. A window-level
+// recognizer can receive cancellation before dispatch in a floating iPad scene.
+@MainActor
+private struct PhysicalSidebarPan: UIGestureRecognizerRepresentable {
     var enabled: Bool
     var isOpen: Bool
+    var size: CGSize
     var onMove: (CGFloat) -> Void
     var onFinish: (CGFloat, CGFloat, Bool) -> Void
 
-    final class Anchor: UIView {
-        var windowChanged: ((UIWindow?) -> Void)?
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            windowChanged?(window)
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator(configuration: self, converter: converter)
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.cancelsTouchesInView = true
+        recognizer.delegate = context.coordinator
+        recognizer.isEnabled = enabled
+        return recognizer
+    }
+
+    func updateUIGestureRecognizer(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        context.coordinator.configuration = self
+        // The view and recognizer remain mounted across real window resizing.
+        if recognizer.isEnabled != enabled {
+            recognizer.isEnabled = enabled
+        }
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        guard enabled else { return }
+        let dx = context.converter.localTranslation?.x ?? 0
+        switch recognizer.state {
+        case .began, .changed:
+            onMove(dx)
+        case .ended:
+            onFinish(dx, context.converter.localVelocity?.x ?? 0, false)
+        case .cancelled, .failed:
+            onFinish(dx, 0, true)
+        default:
+            break
         }
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var configuration: PhysicalSidebarPan
-        weak var anchor: Anchor?
-        weak var installedWindow: UIWindow?
-        private lazy var pan: UIPanGestureRecognizer = {
-            let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-            recognizer.maximumNumberOfTouches = 1
-            recognizer.cancelsTouchesInView = true
-            recognizer.delegate = self
-            return recognizer
-        }()
+        private let converter: CoordinateSpaceConverter
 
-        init(_ configuration: PhysicalSidebarPan) {
+        init(configuration: PhysicalSidebarPan, converter: CoordinateSpaceConverter) {
             self.configuration = configuration
-        }
-
-        func install(in window: UIWindow?) {
-            if installedWindow !== window {
-                installedWindow?.removeGestureRecognizer(pan)
-                installedWindow = window
-                window?.addGestureRecognizer(pan)
-            }
-            // Resizing or dismissing a presentation updates configuration while
-            // retaining the same window and recognizer. Refresh its enabled state.
-            pan.isEnabled = configuration.enabled
+            self.converter = converter
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-            guard configuration.enabled, let anchor, anchor.window === installedWindow else { return false }
-            guard installedWindow?.rootViewController?.presentedViewController == nil else { return false }
-            return anchor.bounds.contains(touch.location(in: anchor))
+            let startPoint = converter.convert(globalPoint: touch.location(in: nil), to: .local)
+            return configuration.enabled
+                && CGRect(origin: .zero, size: configuration.size).contains(startPoint)
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            guard configuration.enabled, let window = installedWindow else { return false }
-            let v = pan.velocity(in: window)
-            guard abs(v.x) > abs(v.y) * 1.3 else { return false }
-            return configuration.isOpen ? v.x < 0 : v.x > 0
+            guard configuration.enabled else { return false }
+            let velocity = converter.localVelocity ?? .zero
+            guard abs(velocity.x) > abs(velocity.y) * 1.3 else { return false }
+            return configuration.isOpen ? velocity.x < 0 : velocity.x > 0
         }
 
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
                                shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-            // Vertical scrolls and native controls continue to work; the
-            // direction gate above decides whether the drawer participates.
+            // Preserve the prototype's native controls and vertical scrolling.
+            // Only the physical horizontal direction gate admits this gesture.
             true
         }
-
-        @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard let window = installedWindow, configuration.enabled else { return }
-            let dx = recognizer.translation(in: window).x
-            switch recognizer.state {
-            case .began, .changed:
-                configuration.onMove(dx)
-            case .ended:
-                configuration.onFinish(dx, recognizer.velocity(in: window).x, false)
-            case .cancelled, .failed:
-                configuration.onFinish(dx, 0, true)
-            default:
-                break
-            }
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    func makeUIView(context: Context) -> Anchor {
-        let view = Anchor()
-        view.isUserInteractionEnabled = false
-        view.isAccessibilityElement = false
-        view.windowChanged = { [weak coordinator = context.coordinator] window in
-            coordinator?.install(in: window)
-        }
-        context.coordinator.anchor = view
-        return view
-    }
-
-    func updateUIView(_ uiView: Anchor, context: Context) {
-        context.coordinator.configuration = self
-        context.coordinator.install(in: uiView.window)
-    }
-
-    static func dismantleUIView(_ uiView: Anchor, coordinator: Coordinator) {
-        uiView.windowChanged = nil
-        coordinator.install(in: nil)
     }
 }
 
