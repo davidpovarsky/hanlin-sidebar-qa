@@ -196,9 +196,21 @@ final class WindowResizeDiscoveryTests: XCTestCase {
                 assertActualSidebar(app, open: true)
                 attachState("narrow-open-from-content-y-\(y)", app: app)
 
-                // The right-hand strip is still visible while the sidebar is
-                // open; this exercises the shared gesture from that content.
-                dragInsideWindow(app, from: CGVector(dx: 0.94, dy: y),
+                // The exposed chat strip is the app-owned closing surface. A
+                // fixed 94% window offset lands in the OS resize hit region at
+                // the observed 375-point width and cancels the app's gesture.
+                let windowFrame = primaryWindow(in: app).frame
+                let visibleContentFrame = app.scrollViews["chat-history"].frame.intersection(windowFrame)
+                XCTAssertFalse(visibleContentFrame.isNull || visibleContentFrame.isEmpty,
+                    "The open drawer must expose actual chat content inside the real window.")
+                let closingStart = CGPoint(x: visibleContentFrame.midX,
+                    y: windowFrame.minY + windowFrame.height * CGFloat(y))
+                XCTAssertTrue(visibleContentFrame.contains(closingStart),
+                    "The closing drag must begin inside exposed chat content: \(closingStart); visible: \(visibleContentFrame).")
+                let closingStartX = (closingStart.x - windowFrame.minX) / windowFrame.width
+                attachText("Visible chat content: \(visibleContentFrame)\nClosing start: \(closingStart)",
+                    name: "narrow-visible-content-target-y-\(y)")
+                dragInsideWindow(app, from: CGVector(dx: closingStartX, dy: y),
                     to: CGVector(dx: 0.10, dy: y), name: "close-content-y-\(y)")
                 assertActualSidebar(app, open: false)
                 assertNarrowWindow(app, referenceWidth: referenceWidth)

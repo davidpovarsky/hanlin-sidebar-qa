@@ -35,3 +35,9 @@ Results include `.xcresult`, screenshots, accessibility hierarchies, simulator/X
 The device Release build is made on macOS from the same commit qualified by all three QA stages. It is deliberately unsigned so SideStore can sign it with the installing account. Packaging preserves the macOS executable permissions and the ZIP path `Payload/HanlinSidebarQA.app/Info.plist`. The workflow verifies that path, checks device platform and ARM64 architecture, validates the built Info.plist, and includes a SHA-256 and tested commit identifier beside the IPA.
 
 Simulator QA verifies the prototype interactions; installation through an individual SideStore account and frame pacing on physical hardware require that hardware. Test evidence should always be associated with its exact Git commit and native run identifier.
+
+## Actual-window gesture targeting
+
+The original narrow-window fixture started a closing drag at 94% of the actual window width. At the OS-selected 375-point width, that position is only 22.5 points inside the physical right edge. Retained native diagnostic `a1ce6dc` recorded `UIWindowScene.effectiveGeometry.isInteractivelyResizing == true` before UIKit cancelled the touch; the video also shows the entire floating window compressing and returning. Those original failed runs remain failure evidence.
+
+The fixture now starts at the horizontal midpoint of the actual `chat-history` frame intersected with the real OS window. It asserts that this exposed area is nonempty and that the start is inside it. The real narrow window, all three gesture heights, destination, press duration, close-state and layout assertions, subsequent interactions, and physical wide-window restoration are preserved. This correction changes the test's input target only; it does not suppress system window gestures or change the app's recognizer. The same 19 test identities must pass on the exact candidate before packaging.
