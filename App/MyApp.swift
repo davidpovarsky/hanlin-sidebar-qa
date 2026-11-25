@@ -317,7 +317,7 @@ struct ContentView: View {
     
     private func toggleSidebar(wide: Bool) {
         if wide {
-            if sidebarVisible { sidebarSearchFocused = false }
+            if sidebarVisible { dismissSidebarSearch() }
             withAnimation(.easeInOut(duration: 0.2)) {
                 sidebarVisible.toggle()
             }
@@ -327,13 +327,23 @@ struct ContentView: View {
     }
 
     private func setCompactSidebar(_ open: Bool) {
-        if !open { sidebarSearchFocused = false }
+        if !open { dismissSidebarSearch() }
         withAnimation(.interactiveSpring(response: 0.34, dampingFraction: 0.88)) {
             compactSidebarVisible = open
             dragOffset = 0
         }
     }
     
+    private func dismissSidebarSearch() {
+        // The transformed sidebar stays mounted after closing. End native
+        // editing before hiding it, while this search still owns focus.
+        // A closed-drawer gesture must not resign the chat composer's focus.
+        guard sidebarSearchFocused else { return }
+        sidebarSearchFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                        to: nil, from: nil, for: nil)
+    }
+
     private func sendFromCompactHome() {
         let value = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
